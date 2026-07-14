@@ -1,0 +1,11 @@
+{
+  "best_value": 0.5430555555555555,
+  "best_params": {
+    "top_k": 16,
+    "top_p": 0.9082219033875295,
+    "temperature": 1.0135690214911635
+  },
+  "best_trial_number": 12,
+  "n_trials": 500,
+  "study_name": "generation_params_optimization"
+}

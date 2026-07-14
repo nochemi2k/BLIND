@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Training run artifacts (pre-trained weights in checkpoints/ are kept)
+checkpoints/*_epoch_*.pt
+checkpoints/*_logs.json
+
+# Evaluation / test outputs
+results*.json
+external_val*.json
+*_results.json
+*_topn.json
+
+# Large datasets (not included in this repository)
+data/processed/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
