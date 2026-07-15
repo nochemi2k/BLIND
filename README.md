@@ -1,12 +1,12 @@
 # BLIND
 
-**Bimodal Learning from Imperfect NMR Data** — a chemistry-ignorant transformer model for autonomous molecular structure elucidation from experimental ¹H and/or ¹³C NMR spectra.
+**Bimodal Learning from Imperfect NMR Data** - a chemistry-ignorant transformer model for autonomous molecular structure elucidation from experimental ¹H and/or ¹³C NMR spectra.
 
 > **Publication:** Zlobin, I.; Bespalov, I.; Shandybo, M.; Rekut, N.; Nelyubina, Y.; Chusov, D.; Afanasyev, O.; Novikov, V. *Bimodal Learning from Imperfect NMR Data (BLIND): A chemistry-ignorant model for autonomous structure elucidation from NMR.* ChemRxiv, 2026. [https://doi.org/10.26434/chemrxiv.15006080.v1](https://doi.org/10.26434/chemrxiv.15006080.v1)
 
 ## Overview
 
-BLIND translates routine 1D NMR peak lists — chemical shifts, integrals (for ¹H), and multiplicity labels — into molecular structures represented as SMILES strings. The model:
+BLIND translates routine 1D NMR peak lists - chemical shifts, integrals (for ¹H), and multiplicity labels - into molecular structures represented as SMILES strings. The model:
 
 - Requires **no chemical priors** (no molecular formula, fragment libraries, or elemental composition)
 - Is trained on **experimental spectra** from the chemical literature (>5.5 million spectra; see paper for dataset details)
@@ -14,7 +14,7 @@ BLIND translates routine 1D NMR peak lists — chemical shifts, integrals (for �
 - Supports **unimodal** (¹H-only or ¹³C-only) and **bimodal** inference
 - Predicts structures including **stereochemistry** via autoregressive SMILES generation
 
-On the main test set, BLIND recovers the exact structure (including stereochemistry) in more than half of diverse cases; on an expert-curated external validation set, accuracy exceeds 80%. Full benchmarks and methodological details are in the [paper](https://doi.org/10.26434/chemrxiv.15006080.v1).
+On the main test set, BLIND recovers the exact structure (including stereochemistry) in more than half of diverse cases; on an expert-curated external validation set, accuracy exceeds 80%. Full benchmarks and methodological details are in the [paper](https://doi.org/10.26434/chemrxiv.15006080.v1). The experimental-only large-scale dataset was acquired from [OdanChem database](https://odanchem.org/).
 
 ## Model
 
@@ -34,7 +34,7 @@ BLIND is a bimodal encoder–decoder Transformer. Each NMR peak is encoded as `(
 ```
 BLIND/
 ├── train.py, evaluate.py, evaluate_top_n.py   # Entry points
-├── requirements.txt                           # Project dependencies (no PyTorch)
+├── requirements.txt                           # Project dependencies
 │
 ├── src/blind/
 │   ├── training.py, evaluation.py, evaluation_top_n.py
@@ -53,10 +53,10 @@ BLIND/
 └── data/
     ├── samples/                               # Small test set (8 compounds)
     │   ├── train.jsonl, val.jsonl, test.jsonl
-    └── external_validation_results.csv        # Full external benchmark
+    └── external_validation_results.csv        # Full external validation set
 ```
 
-The full training dataset is not included due to size. See the paper for data preparation.
+See the paper for full data preparation details.
 
 ## Installation
 
@@ -119,6 +119,8 @@ Multiple lines with the same `smiles` but different `spectrum_type` represent bi
 | `H_doi` / `C_doi` | Source publication DOI |
 
 ## Usage
+
+> A user-friendly web interface (GUI) for this model is also available at [OdanChem](https://odanchem.org/predict-multimodal-compound-search), requiring no local installation.
 
 ### Training
 
@@ -194,9 +196,9 @@ Licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4
 
 ## Authors
 
-- Ivan Zlobin, Ivan Bespalov, Maksim Shandybo — Kurnakov Institute of General and Inorganic Chemistry, RAS
-- Nikolai Rekut, Denis Chusov, Oleg Afanasyev — Nesmeyanov Institute of Organoelement Compounds, RAS
-- Yulia Nelyubina — Federal Research Center of Problems of Chemical Physics and Medicinal Chemistry, RAS
-- Valentin Novikov — Universitat de Barcelona
+- Ivan Zlobin, Ivan Bespalov, Maksim Shandybo - Kurnakov Institute of General and Inorganic Chemistry, RAS
+- Nikolai Rekut, Denis Chusov, Oleg Afanasyev - Nesmeyanov Institute of Organoelement Compounds, RAS
+- Yulia Nelyubina - Federal Research Center of Problems of Chemical Physics and Medicinal Chemistry, RAS
+- Valentin Novikov - Universitat de Barcelona
 
 Correspondence: novikov@ub.edu
