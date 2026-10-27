@@ -30,6 +30,7 @@ external_val*.json
 
 # Large datasets (not included in this repository)
 data/processed/
+data/nmrexp/
 
 # OS
 .DS_Store
