@@ -305,8 +305,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--solvent", type=str, default="CDCl_3", help="Solvent name written to JSONL."
     )
-    parser.add_argument("--val-frac", type=float, default=0.01)
-    parser.add_argument("--test-frac", type=float, default=0.01)
+    parser.add_argument("--val-frac", type=float, default=0.2)
+    parser.add_argument("--test-frac", type=float, default=0.1)
     parser.add_argument("--vocab-size", type=int, default=512, help="Tokenizer vocabulary size.")
     parser.add_argument(
         "--max-smiles-len",
