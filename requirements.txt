@@ -1,17 +1,18 @@
-# BLIND dependencies (Python 3.10–3.12)
-# CPU and Apple MPS only — install PyTorch first, then:
-#   pip install -r requirements.txt
-#
-# CPU (Linux/Windows):
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
-#
-# Apple Silicon (MPS):
-#   pip install torch
-#
-# NVIDIA CUDA: install PyTorch yourself from https://pytorch.org/get-started/locally/
-#   then: pip install -r requirements.txt
-
-numpy>=1.24.0,<2
-sentencepiece>=0.1.99
-tqdm>=4.65.0
-rdkit>=2023.9.1
+filelock==4.2.4
+fsspec==2026.9.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+mpmath==1.3.0
+networkx==3.7
+numpy==2.5.4
+packaging==26.3
+pillow==13.0.0
+pyarrow==26.0.0
+rdkit==2026.9.1
+sentencepiece==0.2.2
+setuptools==83.0.0
+sympy==1.14.0
+torch==2.14.1
+tqdm==4.70.1
+typing_extensions==4.16.0
+wheel==0.47.0
