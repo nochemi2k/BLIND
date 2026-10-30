@@ -30,8 +30,11 @@ SHIFT_RANGES = {"H_NMR": (-5.0, 20.0), "C_NMR": (-50.0, 300.0)}
 H_COUNT_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*H\s*$")
 SPLITS = ("train", "val", "test")
 
-# Peak = (signal, intensity, multiplicity)
-Peak = typing.Tuple[float, float, str]
+MAX_COUPLING_HZ = 1000.0
+COUPLING_RE = re.compile(r"\d+(?:\.\d+)?")
+
+# Peak = (signal, intensity, multiplicity, couplings)
+Peak = typing.Tuple[float, float, str, typing.Tuple[float, ...]]
 
 
 def normalize_multiplicity(label: typing.Any, default: str) -> str:
@@ -42,17 +45,44 @@ def normalize_multiplicity(label: typing.Any, default: str) -> str:
     return label or default
 
 
+def parse_couplings(raw: typing.Any) -> typing.Optional[typing.Tuple[float, ...]]:
+    """Return J values in Hz sorted descending; None if any value is implausible.
+
+    NMRexp stores them as None, a float, a list, or a stringified list of '7.2Hz' items.
+    """
+    if isinstance(raw, str):
+        raw = ast.literal_eval(raw)
+    if raw is None:
+        return ()
+    values = []
+    for item in raw if isinstance(raw, list) else [raw]:
+        if isinstance(item, (int, float)):
+            value = float(item)
+        else:
+            match = COUPLING_RE.search(str(item))
+            if match is None:
+                continue
+            value = float(match.group())
+        if value >= MAX_COUPLING_HZ:
+            return None
+        if value > 0:
+            values.append(value)
+    return tuple(sorted(values, reverse=True))
+
+
 def parse_h_peaks(processed: str) -> typing.Optional[typing.List[Peak]]:
     peaks = []
-    for mult, _couplings, count, hi, lo in ast.literal_eval(processed):
+    for mult, raw_couplings, count, hi, lo in ast.literal_eval(processed):
         match = H_COUNT_RE.match(str(count))
-        if match is None or hi is None or lo is None:
+        couplings = parse_couplings(raw_couplings)
+        if match is None or hi is None or lo is None or couplings is None:
             return None
         peaks.append(
             (
                 round((float(hi) + float(lo)) / 2, 4),
                 float(match.group(1)),
                 normalize_multiplicity(mult, default="m"),
+                couplings,
             )
         )
     return peaks
@@ -60,10 +90,13 @@ def parse_h_peaks(processed: str) -> typing.Optional[typing.List[Peak]]:
 
 def parse_c_peaks(processed: str) -> typing.Optional[typing.List[Peak]]:
     peaks = []
-    for shift, mult, _coupling in ast.literal_eval(processed):
-        if shift is None:
+    for shift, mult, raw_couplings in ast.literal_eval(processed):
+        couplings = parse_couplings(raw_couplings)
+        if shift is None or couplings is None:
             return None
-        peaks.append((round(float(shift), 4), 1.0, normalize_multiplicity(mult, default="s")))
+        # A coupled carbon without a reported label is not a singlet.
+        default = "m" if couplings else "s"
+        peaks.append((round(float(shift), 4), 1.0, normalize_multiplicity(mult, default), couplings))
     return peaks
 
 
@@ -71,7 +104,7 @@ def is_valid_spectrum(peaks: typing.List[Peak], spectrum_type: str, max_peaks: i
     if not 0 < len(peaks) <= max_peaks:
         return False
     low, high = SHIFT_RANGES[spectrum_type]
-    for signal, intensity, _ in peaks:
+    for signal, intensity, _, _ in peaks:
         if not (math.isfinite(signal) and low <= signal <= high):
             return False
         if not (math.isfinite(intensity) and 0 < intensity <= 200):
@@ -123,6 +156,8 @@ def _process_chunk(
             continue
 
         stats["parsed_spectra"] += 1
+        for peak in peaks:
+            stats[f"peaks_with_{len(peak[3])}_couplings"] += 1
         records.append((smiles, key, spectrum_type, tuple(peaks)))
     return records, stats
 
@@ -260,7 +295,8 @@ def prepare(args: argparse.Namespace) -> None:
                     "spectrum_type": spectrum_type,
                     "solvent": args.solvent,
                     "spectrum": [
-                        {"signal": s, "intensity": i, "multiplicity": m} for s, i, m in peaks
+                        {"signal": s, "intensity": i, "multiplicity": m, "couplings": list(j)}
+                        for s, i, m, j in peaks
                     ],
                 }
                 files[split].write(json.dumps(record) + "\n")

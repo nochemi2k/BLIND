@@ -1,0 +1,20 @@
+{
+  "s": "s", "S": "s", "apps": "s",
+  "d": "d", "D": "d", "appd": "d", "dapp": "d", "brd": "d", "br_d": "d", "bd": "d",
+  "t": "t", "T": "t", "appt": "t", "vt": "t", "tlike": "t", "brt": "t", "br_t": "t", "bt": "t",
+  "q": "q", "Q": "q", "appq": "q", "qlike": "q", "brq": "q", "br_q": "q", "bq": "q", "quart": "q", "quartet": "q",
+  "p": "p", "appp": "p", "quint": "p", "quintet": "p", "quin": "p", "pent": "p", "pentet": "p", "penta": "p",
+  "hept": "hept", "heptet": "hept", "sept": "hept", "septet": "hept", "sep": "hept", "spt": "hept", "sp": "hept", "h": "hept",
+  "dd": "dd", "appdd": "dd", "brdd": "dd",
+  "dt": "dt", "appdt": "dt", "dtlike": "dt",
+  "td": "td", "apptd": "td",
+  "tt": "tt", "apptt": "tt",
+  "dq": "dq", "appdq": "dq",
+  "qd": "qd", "appqd": "qd",
+  "ddd": "ddd", "appddd": "ddd",
+  "ddt": "ddt", "appddt": "ddt",
+  "dddd": "dddd",
+  "brs": "brs", "br_s": "brs", "bs": "brs", "verybr_s": "brs",
+  "br": "br", "br_": "br", "b": "br", "broad": "br", "br_signal": "br",
+  "m": "m", "M": "m"
+}
