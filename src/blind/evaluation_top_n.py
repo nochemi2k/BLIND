@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 from rdkit import Chem, RDLogger
 
 from .models.transformer import Transformer
-from .training import NMRDataset, load_multiplicity_codes, process_data, move_to_device
+from .training import NMRDataset, build_model, load_multiplicity_codes, process_data, move_to_device
 from .evaluation import (
     EvaluationDataset,
     collate_eval,
@@ -325,22 +325,7 @@ def evaluate_top_n(
         persistent_workers=args.num_workers > 0,
     )
 
-    model = Transformer(
-        multiplicity_vocab_size=len(NMRDataset.MULTIPLICITY2IDX),
-        multiplicity_hidden_dim=48,
-        spectrum_d_ff=256,
-        spectrum_hidden_dim=104,
-        intensity_d_ff=256,
-        intensity_hidden_dim=104,
-        tgt_vocab_size=tokenizer.vocab_size(),
-        d_model=256,
-        num_heads=8,
-        num_layers=6,
-        d_ff=512,
-        max_seq_length=400,
-        dropout=0.2,
-        smiles_pad_token=tokenizer.pad_id(),
-    ).to(device)
+    model = build_model(tokenizer, smiles_pad_token=tokenizer.pad_id()).to(device)
 
     state_dict = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(state_dict)
@@ -558,7 +543,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--multiplicity-codes-path",
         type=str,
-        default="src/blind/data/multiplicity_codes.json",
+        default="src/blind/data/multiplicity_codes_nmrexp.json",
         help="Path to multiplicity codes JSON.",
     )
     parser.add_argument(

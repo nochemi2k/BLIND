@@ -41,6 +41,9 @@ def load_multiplicity_codes(path: str) -> typing.DefaultDict[str, str]:
     return multiplicity_codes
 
 
+CARBON_MULTIPLICITIES = {"s", "d", "t", "q", "dd", "m"}
+
+
 def process_data(x: dict, multiplicity_codes: typing.Mapping[str, str]) -> dict:
     import copy
 
@@ -49,7 +52,7 @@ def process_data(x: dict, multiplicity_codes: typing.Mapping[str, str]) -> dict:
     for spectrum in x_copy["spectrum"]:
         spectrum["multiplicity"] = multiplicity_codes[spectrum["multiplicity"]]
         if x_copy["spectrum_type"] == "C_NMR":
-            if spectrum["multiplicity"] in {"dt", "td", "ddd"}:
+            if spectrum["multiplicity"] not in CARBON_MULTIPLICITIES:
                 spectrum["multiplicity"] = "m"
     return x_copy
 
@@ -61,12 +64,32 @@ class NMRDataset(torch.utils.data.Dataset):
         "d": 2,
         "t": 3,
         "q": 4,
-        "dd": 5,
-        "dt": 6,
-        "td": 7,
-        "ddd": 8,
-        "m": 9,
+        "p": 5,
+        "hept": 6,
+        "dd": 7,
+        "dt": 8,
+        "td": 9,
+        "tt": 10,
+        "dq": 11,
+        "qd": 12,
+        "ddd": 13,
+        "ddt": 14,
+        "dddd": 15,
+        "brs": 16,
+        "br": 17,
+        "m": 18,
     }
+    MAX_COUPLINGS = 4
+    COUPLING_PAD = -1.0
+
+    @classmethod
+    def _coupling_tensor(cls, peaks: typing.List[typing.Dict[str, typing.Any]]) -> torch.Tensor:
+        """[L, MAX_COUPLINGS] J values in Hz, largest first, right-padded with COUPLING_PAD."""
+        couplings = torch.full((len(peaks), cls.MAX_COUPLINGS), cls.COUPLING_PAD, dtype=torch.float32)
+        for i, peak in enumerate(peaks):
+            values = sorted(peak.get("couplings") or [], reverse=True)[: cls.MAX_COUPLINGS]
+            couplings[i, : len(values)] = torch.tensor(values, dtype=torch.float32)
+        return couplings
 
     def __init__(
         self,
@@ -97,6 +120,7 @@ class NMRDataset(torch.utils.data.Dataset):
                         ],
                         dtype=torch.int64,
                     ),
+                    "coupling": self._coupling_tensor(spectrum["spectrum"]),
                 }
                 for spectrum in spectra
                 if spectrum["spectrum_type"] == "C_NMR"
@@ -123,6 +147,7 @@ class NMRDataset(torch.utils.data.Dataset):
                         ],
                         dtype=torch.int64,
                     ),
+                    "coupling": self._coupling_tensor(spectrum["spectrum"]),
                 }
                 for spectrum in spectra
                 if spectrum["spectrum_type"] == "H_NMR"
@@ -181,9 +206,11 @@ def collate_fn(
     carbon_spectrum = []
     carbon_intensity = []
     carbon_multiplicity = []
+    carbon_coupling = []
     hydrogen_spectrum = []
     hydrogen_intensity = []
     hydrogen_multiplicity = []
+    hydrogen_coupling = []
 
     for cur in batch:
         smiles.append(cur["smiles"][:max_smiles_len])
@@ -191,6 +218,7 @@ def collate_fn(
             carbon_spectrum.append(cur["carbon_spectrum"]["spectrum"])
             carbon_intensity.append(cur["carbon_spectrum"]["intensity"])
             carbon_multiplicity.append(cur["carbon_spectrum"]["multiplicity"])
+            carbon_coupling.append(cur["carbon_spectrum"]["coupling"])
         else:
             carbon_spectrum.append(
                 torch.tensor([spectrum_pad_token], dtype=torch.float32)
@@ -201,11 +229,15 @@ def collate_fn(
                     [NMRDataset.MULTIPLICITY2IDX["<SYS>"]], dtype=torch.int64
                 )
             )
+            carbon_coupling.append(
+                torch.full((1, NMRDataset.MAX_COUPLINGS), NMRDataset.COUPLING_PAD, dtype=torch.float32)
+            )
 
         if cur["hydrogen_spectrum"] is not None:
             hydrogen_spectrum.append(cur["hydrogen_spectrum"]["spectrum"])
             hydrogen_intensity.append(cur["hydrogen_spectrum"]["intensity"])
             hydrogen_multiplicity.append(cur["hydrogen_spectrum"]["multiplicity"])
+            hydrogen_coupling.append(cur["hydrogen_spectrum"]["coupling"])
         else:
             hydrogen_spectrum.append(
                 torch.tensor([spectrum_pad_token], dtype=torch.float32)
@@ -215,6 +247,9 @@ def collate_fn(
                 torch.tensor(
                     [NMRDataset.MULTIPLICITY2IDX["<SYS>"]], dtype=torch.int64
                 )
+            )
+            hydrogen_coupling.append(
+                torch.full((1, NMRDataset.MAX_COUPLINGS), NMRDataset.COUPLING_PAD, dtype=torch.float32)
             )
 
     return {
@@ -239,6 +274,11 @@ def collate_fn(
                 batch_first=True,
                 padding_value=NMRDataset.MULTIPLICITY2IDX["<SYS>"],
             ),
+            "coupling": torch.nn.utils.rnn.pad_sequence(
+                sequences=carbon_coupling,
+                batch_first=True,
+                padding_value=NMRDataset.COUPLING_PAD,
+            ),
         },
         "H_NMR": {
             "spectrum": torch.nn.utils.rnn.pad_sequence(
@@ -255,6 +295,11 @@ def collate_fn(
                 sequences=hydrogen_multiplicity,
                 batch_first=True,
                 padding_value=NMRDataset.MULTIPLICITY2IDX["<SYS>"],
+            ),
+            "coupling": torch.nn.utils.rnn.pad_sequence(
+                sequences=hydrogen_coupling,
+                batch_first=True,
+                padding_value=NMRDataset.COUPLING_PAD,
             ),
         },
     }
@@ -375,8 +420,11 @@ def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) ->
         spectrum_hidden_dim=104,
         intensity_d_ff=256,
         intensity_hidden_dim=104,
+        max_couplings=NMRDataset.MAX_COUPLINGS,
+        coupling_d_ff=256,
+        coupling_slot_dim=8,
         tgt_vocab_size=tokenizer.vocab_size(),
-        d_model=256,
+        d_model=288,  # 104 + 104 + 48 + 4 * 8
         num_heads=8,
         num_layers=6,
         d_ff=512,
@@ -527,7 +575,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--multiplicity-codes-path",
         type=str,
-        default="src/blind/data/multiplicity_codes.json",
+        default="src/blind/data/multiplicity_codes_nmrexp.json",
         help="Path to multiplicity codes JSON.",
     )
     parser.add_argument(

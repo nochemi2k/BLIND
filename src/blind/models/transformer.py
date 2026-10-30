@@ -27,6 +27,28 @@ class FourierEmbedding(torch.nn.Module):
         fourier = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1) # [B, L, d_ff]
         return self.proj(fourier)
 
+class CouplingEmbedding(torch.nn.Module):
+    def __init__(
+        self,
+        max_couplings : int,
+        d_ff : int,
+        slot_dim : int
+    ) -> None:
+        super(CouplingEmbedding, self).__init__()
+
+        self.fourier = FourierEmbedding(d_ff=d_ff, output_dim=slot_dim)
+        self.no_coupling = torch.nn.Parameter(torch.randn(max_couplings, slot_dim))
+
+    def forward(
+        self,
+        x : torch.Tensor # [B, L, max_couplings], negative means no coupling
+    ) -> torch.Tensor: # [B, L, max_couplings * slot_dim]
+        batch_size, seq_length, max_couplings = x.size()
+        slots = self.fourier(x.reshape(batch_size, seq_length * max_couplings))
+        slots = slots.reshape(batch_size, seq_length, max_couplings, -1)
+        slots = torch.where((x < 0).unsqueeze(-1), self.no_coupling, slots)
+        return slots.flatten(start_dim=2)
+
 class SpectrumEmbedding(torch.nn.Module):
     def __init__(
         self,
@@ -36,6 +58,9 @@ class SpectrumEmbedding(torch.nn.Module):
         intensity_d_ff : int,
         intensity_hidden_dim : int,
         multiplicity_hidden_dim : int,
+        max_couplings : int,
+        coupling_d_ff : int,
+        coupling_slot_dim : int,
     ) -> None:
         super(SpectrumEmbedding, self).__init__()
 
@@ -72,6 +97,21 @@ class SpectrumEmbedding(torch.nn.Module):
             }
         )
 
+        self.coupling_embs : torch.nn.ModuleDict[str, torch.nn.Module] = torch.nn.ModuleDict(
+            {
+                "C_NMR" : CouplingEmbedding(
+                    max_couplings=max_couplings,
+                    d_ff=coupling_d_ff,
+                    slot_dim=coupling_slot_dim
+                ),
+                "H_NMR" : CouplingEmbedding(
+                    max_couplings=max_couplings,
+                    d_ff=coupling_d_ff,
+                    slot_dim=coupling_slot_dim
+                ),
+            }
+        )
+
     def forward(
         self,
         data : typing.Dict[str, torch.Tensor],
@@ -84,8 +124,9 @@ class SpectrumEmbedding(torch.nn.Module):
         spectrum_emb = self.spectrum_embs[spectrum_type](data['spectrum'])
         intensity_emb = self.intensity_embs[spectrum_type](data['intensity'])
         multiplicity_emb = self.multiplicity_embs[spectrum_type](data['multiplicity'])
+        coupling_emb = self.coupling_embs[spectrum_type](data['coupling'])
         
-        return torch.cat([spectrum_emb, intensity_emb, multiplicity_emb], dim=-1)
+        return torch.cat([spectrum_emb, intensity_emb, multiplicity_emb, coupling_emb], dim=-1)
 
 class MultiHeadAttention(torch.nn.Module):
     def __init__(self, d_model, num_heads):
@@ -237,6 +278,9 @@ class Transformer(torch.nn.Module):
         intensity_hidden_dim : int,
         multiplicity_vocab_size : int,
         multiplicity_hidden_dim : int,
+        max_couplings : int,
+        coupling_d_ff : int,
+        coupling_slot_dim : int,
         tgt_vocab_size : int, 
         d_model : int, 
         num_heads : int, 
@@ -255,6 +299,9 @@ class Transformer(torch.nn.Module):
             spectrum_hidden_dim=spectrum_hidden_dim,
             intensity_d_ff=intensity_d_ff,
             intensity_hidden_dim=intensity_hidden_dim,
+            max_couplings=max_couplings,
+            coupling_d_ff=coupling_d_ff,
+            coupling_slot_dim=coupling_slot_dim,
         )
         
         self.decoder_embedding = torch.nn.Embedding(tgt_vocab_size, d_model)

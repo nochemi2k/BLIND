@@ -22,7 +22,7 @@ BLIND is a bimodal encoder–decoder Transformer. Each NMR peak is encoded as `(
 
 | Parameter | Value |
 |-----------|-------|
-| `d_model` | 256 |
+| `d_model` | 288 (shift 104, intensity 104, multiplicity 48, J couplings 32) |
 | Encoder/decoder layers | 6 each, 8 heads |
 | Optimizer | AdamW, lr = 3×10⁻⁴ |
 | Batch size / epochs | 128 / 200 |
@@ -117,6 +117,12 @@ Multiple lines with the same `smiles` but different `spectrum_type` represent bi
 | `spectra_type` | Evaluation modality |
 | `prediction_canonical` | Previously reported BLIND prediction |
 | `H_doi` / `C_doi` | Source publication DOI |
+
+## Training on NMRexp
+
+`prepare_nmrexp.py` converts the [NMRexp](https://zenodo.org/records/17296666) parquet into `data/nmrexp/processed/` (70/20/10 splits by molecule and a new tokenizer). Each peak also carries `couplings`, the J values in Hz; the model uses the 4 largest per peak. Multiplicities use `src/blind/data/multiplicity_codes_nmrexp.json`; labels not listed there become `m`.
+
+The peak embedding includes J constants, so `checkpoints/blind_trained_weights.pt` does not load with this model.
 
 ## Usage
 
