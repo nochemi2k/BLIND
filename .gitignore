@@ -22,12 +22,6 @@ env/
 checkpoints/*_epoch_*.pt
 checkpoints/*_logs.json
 
-# Evaluation / test outputs
-results*.json
-external_val*.json
-*_results.json
-*_topn.json
-
 # Large datasets (not included in this repository)
 data/processed/
 data/nmrexp/
