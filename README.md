@@ -124,6 +124,31 @@ Multiple lines with the same `smiles` but different `spectrum_type` represent bi
 
 The peak embedding includes J constants, so `checkpoints/blind_trained_weights.pt` does not load with this model.
 
+### Heteronuclear spectra (19F, 31P, 11B, 29Si)
+
+`prepare_nmrexp_hetero.py` copies `data/nmrexp/processed/` to `data/nmrexp/processed_hetero/` and adds the CDCl3 heteronuclear spectra (`F_NMR`, `P_NMR`, `B_NMR`, `Si_NMR` records) of the same molecules; splits and tokenizer are unchanged. The model (`src/blind/models/hetero_transformer.py`) adds a small encoder per nucleus and a cross-attention per nucleus in every decoder layer. `hetero/` runs the main training and evaluation code with it, without changing the main code.
+
+```bash
+python prepare_nmrexp_hetero.py
+
+# Fine-tune a trained 1H/13C model; each epoch: all molecules with heteronuclear spectra + as many without
+python hetero/train.py \
+    --init-checkpoint checkpoints/<1H/13C model>.pt \
+    --train-path data/nmrexp/processed_hetero/train.jsonl.gz \
+    --val-path data/nmrexp/processed_hetero/val.jsonl.gz \
+    --tokenizer-path data/nmrexp/processed/smiles_tokenizer.model \
+    --lr 1e-4 --epochs 30 --exp-prefix hetero
+
+# Evaluate; --no-hetero hides the heteronuclear spectra (same weights, ablation)
+python hetero/evaluate.py \
+    --checkpoint checkpoints/hetero_epoch_29.pt \
+    --data-path data/nmrexp/processed_hetero/test.jsonl.gz \
+    --tokenizer-path data/nmrexp/processed/smiles_tokenizer.model \
+    --output-json results/hetero.json
+```
+
+The 1H/13C weights are loaded as they are; heteronuclear encoders and cross-attentions start from random weights with a zero output projection, so before fine-tuning the model reproduces the base model.
+
 ## Usage
 
 > A user-friendly web interface (GUI) for this model is also available at [OdanChem](https://odanchem.org/predict-multimodal-compound-search), requiring no local installation.
