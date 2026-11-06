@@ -131,7 +131,7 @@ The peak embedding includes J constants, so `checkpoints/blind_trained_weights.p
 ```bash
 python prepare_nmrexp_hetero.py
 
-# Fine-tune a trained 1H/13C model; each epoch: all molecules with heteronuclear spectra + as many without
+# Fine-tune a trained 1H/13C model; each epoch: all molecules with heteronuclear spectra + 3 times as many without
 python hetero/train.py \
     --init-checkpoint checkpoints/<1H/13C model>.pt \
     --train-path data/nmrexp/processed_hetero/train.jsonl.gz \
@@ -148,6 +148,8 @@ python hetero/evaluate.py \
 ```
 
 The 1H/13C weights are loaded as they are; heteronuclear encoders and cross-attentions start from random weights with a zero output projection, so before fine-tuning the model reproduces the base model.
+
+During fine-tuning each heteronuclear spectrum is dropped with probability 0.2; the 13C/1H dropout is unchanged, so at least one spectrum always remains. A nucleus absent from the molecule (no F, P, B or Si atom) is given as an empty spectrum with probability 0.5: a learned vector per nucleus that the decoder attends to, unlike a spectrum that is not given at all. A nucleus present in the molecule without a spectrum is never given as empty. In evaluation, `--empty-hetero` gives the empty spectrum for every absent nucleus (taken from the true structure, as if the spectrum were measured and showed no signals).
 
 ## Usage
 

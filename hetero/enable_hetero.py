@@ -6,7 +6,12 @@ also return one spectrum of each available heteronucleus. Heteronuclear tensors 
 the 13C batch dict as "<type>/<field>" keys, so the main loops run unchanged.
 
 Training is a fine-tune of a trained 1H/13C model (INIT_CHECKPOINT): every epoch sees all
-molecules with a heteronuclear spectrum plus as many randomly drawn molecules without one.
+molecules with a heteronuclear spectrum plus PLAIN_PER_HETERO times as many randomly drawn
+molecules without one.
+Each heteronuclear spectrum is dropped with probability HETERO_DROP_PROB (the 13C/1H dropout of
+NMRDataset is unchanged, so at least one spectrum always remains). A nucleus absent from the
+molecule is given as an empty spectrum with probability EMPTY_SPECTRUM_PROB; a nucleus present
+in the molecule but without a spectrum is never given as empty.
 """
 import sys
 import typing
@@ -17,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import numpy as np
 import sentencepiece as spm
 import torch
+from rdkit import Chem, RDLogger
 from tqdm.auto import tqdm
 
 from blind import evaluation, evaluation_top_n, training
@@ -27,6 +33,13 @@ from blind.training import NMRDataset, collate_fn, load_multiplicity_codes, proc
 
 INIT_CHECKPOINT: typing.Optional[str] = None  # set by train.py
 USE_HETERO = True  # evaluate*.py --no-hetero sets False
+EMPTY_HETERO = False  # evaluate*.py --empty-hetero sets True: absent nuclei get an empty spectrum
+
+HETERO_DROP_PROB = 0.2
+EMPTY_SPECTRUM_PROB = 0.5
+PLAIN_PER_HETERO = 3  # molecules without heteronuclear spectra per molecule with one, per epoch
+HETERO_ELEMENTS = {"F_NMR": "F", "P_NMR": "P", "B_NMR": "B", "Si_NMR": "Si"}
+EMPTY = "empty"  # stands for an empty spectrum in dataset items
 
 FIELDS = ("spectrum", "intensity", "multiplicity", "coupling")
 
@@ -97,8 +110,18 @@ def _tensorize(spectrum: dict) -> typing.Dict[str, torch.Tensor]:
     }
 
 
+def absent_hetero(smiles: str) -> typing.FrozenSet[str]:
+    """Heteronuclear spectrum types whose element is not in the molecule."""
+    RDLogger.DisableLog("rdApp.*")
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return frozenset()
+    elements = {atom.GetSymbol() for atom in mol.GetAtoms()}
+    return frozenset(t for t in HETERO_TYPES if HETERO_ELEMENTS[t] not in elements)
+
+
 class HeteroNMRDataset(NMRDataset):
-    """NMRDataset + one random spectrum of each available heteronucleus (never dropped)."""
+    """NMRDataset + one random spectrum of each available heteronucleus, or an empty one for absent nuclei."""
 
     def __init__(
         self,
@@ -120,6 +143,7 @@ class HeteroNMRDataset(NMRDataset):
             }
             for spectrum_type in HETERO_TYPES
         }
+        self.absent_hetero = {smiles: absent_hetero(smiles) for smiles in tqdm(data.keys(), desc="Elements")}
 
     def has_hetero(self, idx: int) -> bool:
         smiles = self.idx2smiles[idx]
@@ -128,14 +152,26 @@ class HeteroNMRDataset(NMRDataset):
     def __getitem__(self, idx: int) -> typing.Dict[str, typing.Any]:
         item = super().__getitem__(idx)
         smiles = self.idx2smiles[idx]
-        item["hetero"] = {t: self._select_spectrum(self.hetero_spectra[t][smiles]) for t in HETERO_TYPES}
+        hetero = {}
+        for spectrum_type in HETERO_TYPES:
+            spectrum = self._select_spectrum(self.hetero_spectra[spectrum_type][smiles])
+            if spectrum is None:
+                if spectrum_type in self.absent_hetero[smiles] and np.random.rand() < EMPTY_SPECTRUM_PROB:
+                    spectrum = EMPTY
+            elif np.random.rand() < HETERO_DROP_PROB:
+                spectrum = None
+            hetero[spectrum_type] = spectrum
+        # Every molecule has a 13C or 1H spectrum and NMRDataset drops at most one of them,
+        # so dropping heteronuclear spectra never leaves an example without input
+        assert item["carbon_spectrum"] is not None or item["hydrogen_spectrum"] is not None
+        item["hetero"] = hetero
         return item
 
 
 class HeteroEvaluationDataset(EvaluationDataset):
     """Same 13C/1H pairs as EvaluationDataset; pair k of a molecule gets its k-th spectrum of each heteronucleus."""
 
-    def __init__(self, base_dataset: HeteroNMRDataset, use_hetero: bool) -> None:
+    def __init__(self, base_dataset: HeteroNMRDataset, use_hetero: bool, empty_hetero: bool) -> None:
         super().__init__(base_dataset)
         combo_idx: typing.Dict[str, int] = {}
         for example, smiles in zip(self.examples, self.example_smiles):
@@ -144,7 +180,12 @@ class HeteroEvaluationDataset(EvaluationDataset):
             example["hetero"] = {}
             for spectrum_type in HETERO_TYPES:
                 spectra = base_dataset.hetero_spectra[spectrum_type][smiles] if use_hetero else []
-                example["hetero"][spectrum_type] = spectra[k % len(spectra)] if spectra else None
+                if spectra:
+                    example["hetero"][spectrum_type] = spectra[k % len(spectra)]
+                elif empty_hetero and spectrum_type in base_dataset.absent_hetero[smiles]:
+                    example["hetero"][spectrum_type] = EMPTY
+                else:
+                    example["hetero"][spectrum_type] = None
 
     def _build_examples(self, base_dataset: NMRDataset) -> None:
         super()._build_examples(base_dataset)
@@ -167,9 +208,21 @@ def add_hetero(
     }
     for spectrum_type in HETERO_TYPES:
         columns: typing.Dict[str, typing.List[torch.Tensor]] = {field: [] for field in FIELDS}
+        empty = []
         for cur in batch:
             spectrum = cur["hetero"][spectrum_type]
-            if spectrum is not None:
+            empty.append(isinstance(spectrum, str))
+            if isinstance(spectrum, str):
+                # One placeholder peak; the model replaces its encoding by a learned vector
+                columns["spectrum"].append(torch.tensor([0.0], dtype=torch.float32))
+                columns["intensity"].append(torch.tensor([0.0], dtype=torch.float32))
+                columns["multiplicity"].append(
+                    torch.tensor([NMRDataset.MULTIPLICITY2IDX["<SYS>"]], dtype=torch.int64)
+                )
+                columns["coupling"].append(
+                    torch.full((1, NMRDataset.MAX_COUPLINGS), NMRDataset.COUPLING_PAD, dtype=torch.float32)
+                )
+            elif spectrum is not None:
                 for field in FIELDS:
                     columns[field].append(spectrum[field][:max_spectrum_len])
             else:
@@ -187,6 +240,7 @@ def add_hetero(
                 batch_first=True,
                 padding_value=pad_values[field],
             )
+        collated["C_NMR"][f"{spectrum_type}/empty"] = torch.tensor(empty, dtype=torch.bool)
     return collated
 
 
@@ -230,7 +284,7 @@ class CollateHeteroEvalWrapper:
 
 class BalancedHeteroSampler(torch.utils.data.Sampler):
     """
-    Every epoch: all molecules with a heteronuclear spectrum plus as many molecules without one,
+    Every epoch: all molecules with a heteronuclear spectrum plus PLAIN_PER_HETERO times as many without one,
     drawn anew each epoch, shuffled together. With fixed=True the draw is the same every epoch.
     """
 
@@ -238,7 +292,7 @@ class BalancedHeteroSampler(torch.utils.data.Sampler):
         flags = np.array([dataset.has_hetero(idx) for idx in range(len(dataset))])
         self.hetero_idx = np.flatnonzero(flags)
         self.plain_idx = np.flatnonzero(~flags)
-        self.num_plain = min(len(self.hetero_idx), len(self.plain_idx))
+        self.num_plain = min(PLAIN_PER_HETERO * len(self.hetero_idx), len(self.plain_idx))
         self.seed = seed
         self.fixed = fixed
         self.epoch = 0
@@ -336,8 +390,8 @@ def build_eval_dataset(
         smiles_bos_id=tokenizer.bos_id(),
         smiles_eos_id=tokenizer.eos_id(),
     )
-    print(f"Heteronuclear spectra: {'ON' if USE_HETERO else 'OFF'}")
-    return HeteroEvaluationDataset(base_dataset, use_hetero=USE_HETERO)
+    print(f"Heteronuclear spectra: {'ON' if USE_HETERO else 'OFF'}; empty spectra for absent nuclei: {'ON' if EMPTY_HETERO else 'OFF'}")
+    return HeteroEvaluationDataset(base_dataset, use_hetero=USE_HETERO, empty_hetero=EMPTY_HETERO)
 
 
 training.build_dataloaders = build_dataloaders

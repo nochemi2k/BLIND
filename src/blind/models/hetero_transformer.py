@@ -176,6 +176,11 @@ class HeteroTransformer(Transformer):
                 for spectrum_type in self.hetero_types
             }
         )
+        # Encoder output for an empty spectrum: the nucleus is absent from the molecule, unlike a
+        # spectrum that was not given at all (no cross-attention then)
+        self.hetero_empty = torch.nn.ParameterDict(
+            {spectrum_type : torch.nn.Parameter(torch.randn(d_model) * 0.02) for spectrum_type in self.hetero_types}
+        )
 
         self.decoder_layers = torch.nn.ModuleList(
             [HeteroDecoderLayer(d_model, num_heads, d_ff, dropout, self.hetero_types) for _ in range(base_kwargs['num_layers'])]
@@ -190,7 +195,8 @@ class HeteroTransformer(Transformer):
         missing, unexpected = self.load_state_dict(base_state_dict, strict=False)
         if unexpected:
             raise ValueError(f"Base checkpoint has unknown keys: {unexpected[:5]}")
-        not_new = [k for k in missing if not (k.startswith("hetero_encoders.") or ".hetero_cross_attn." in k)]
+        new_prefixes = ("hetero_encoders.", "hetero_empty.")
+        not_new = [k for k in missing if not (k.startswith(new_prefixes) or ".hetero_cross_attn." in k)]
         if not_new:
             raise ValueError(f"Base checkpoint is missing keys: {not_new[:5]}")
 
@@ -199,6 +205,14 @@ class HeteroTransformer(Transformer):
                 for hetero_cross_attn in dec_layer.hetero_cross_attn.values():
                     hetero_cross_attn.W_o.weight.zero_()
                     hetero_cross_attn.W_o.bias.zero_()
+
+    def load_state_dict(self, state_dict, strict=True, assign=False):
+        # Checkpoints saved before the empty-spectrum embeddings keep their initial values
+        state_dict = dict(state_dict)
+        for key, value in self.state_dict().items():
+            if key.startswith("hetero_empty."):
+                state_dict.setdefault(key, value)
+        return super(HeteroTransformer, self).load_state_dict(state_dict, strict=strict, assign=assign)
 
     def forward(
         self,
@@ -233,7 +247,12 @@ class HeteroTransformer(Transformer):
             src_hetero_mask = (data['spectrum'] != SPECTRUM_PAD).unsqueeze(1).unsqueeze(2)
             if not src_hetero_mask.any():
                 continue
-            enc_hetero_outputs[spectrum_type] = self.hetero_encoders[spectrum_type](data, src_hetero_mask)
+            enc_hetero_output = self.hetero_encoders[spectrum_type](data, src_hetero_mask)
+            if 'empty' in data:
+                # An empty spectrum is one placeholder peak; its encoding is replaced by the learned vector
+                empty = data['empty'].view(-1, 1, 1)
+                enc_hetero_output = torch.where(empty, self.hetero_empty[spectrum_type].to(enc_hetero_output.dtype), enc_hetero_output)
+            enc_hetero_outputs[spectrum_type] = enc_hetero_output
             src_hetero_masks[spectrum_type] = src_hetero_mask
 
         dec_output = tgt_embedded
