@@ -214,6 +214,26 @@ class HeteroTransformer(Transformer):
                 state_dict.setdefault(key, value)
         return super(HeteroTransformer, self).load_state_dict(state_dict, strict=strict, assign=assign)
 
+    def encode_hetero(
+        self,
+        src_hetero : typing.Dict[str, typing.Dict[str, torch.Tensor]]
+    ) -> typing.Tuple[typing.Dict[str, torch.Tensor], typing.Dict[str, torch.Tensor]]:
+        enc_hetero_outputs : typing.Dict[str, torch.Tensor] = {}
+        src_hetero_masks : typing.Dict[str, torch.Tensor] = {}
+        for spectrum_type, data in src_hetero.items():
+            # 19F shifts are mostly negative, so padding is found by its value, not by sign
+            src_hetero_mask = (data['spectrum'] != SPECTRUM_PAD).unsqueeze(1).unsqueeze(2)
+            if not src_hetero_mask.any():
+                continue
+            enc_hetero_output = self.hetero_encoders[spectrum_type](data, src_hetero_mask)
+            if 'empty' in data:
+                # An empty spectrum is one placeholder peak; its encoding is replaced by the learned vector
+                empty = data['empty'].view(-1, 1, 1)
+                enc_hetero_output = torch.where(empty, self.hetero_empty[spectrum_type].to(enc_hetero_output.dtype), enc_hetero_output)
+            enc_hetero_outputs[spectrum_type] = enc_hetero_output
+            src_hetero_masks[spectrum_type] = src_hetero_mask
+        return enc_hetero_outputs, src_hetero_masks
+
     def forward(
         self,
         src_c_nmr : typing.Dict[str, torch.Tensor],
@@ -240,20 +260,7 @@ class HeteroTransformer(Transformer):
         for enc_layer in self.encoder_hydrogen_layers:
             enc_hydrogen_output = enc_layer(enc_hydrogen_output, src_hydrogen_mask)
 
-        enc_hetero_outputs : typing.Dict[str, torch.Tensor] = {}
-        src_hetero_masks : typing.Dict[str, torch.Tensor] = {}
-        for spectrum_type, data in src_hetero.items():
-            # 19F shifts are mostly negative, so padding is found by its value, not by sign
-            src_hetero_mask = (data['spectrum'] != SPECTRUM_PAD).unsqueeze(1).unsqueeze(2)
-            if not src_hetero_mask.any():
-                continue
-            enc_hetero_output = self.hetero_encoders[spectrum_type](data, src_hetero_mask)
-            if 'empty' in data:
-                # An empty spectrum is one placeholder peak; its encoding is replaced by the learned vector
-                empty = data['empty'].view(-1, 1, 1)
-                enc_hetero_output = torch.where(empty, self.hetero_empty[spectrum_type].to(enc_hetero_output.dtype), enc_hetero_output)
-            enc_hetero_outputs[spectrum_type] = enc_hetero_output
-            src_hetero_masks[spectrum_type] = src_hetero_mask
+        enc_hetero_outputs, src_hetero_masks = self.encode_hetero(src_hetero)
 
         dec_output = tgt_embedded
         for dec_layer in self.decoder_layers:

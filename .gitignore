@@ -34,3 +34,7 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 ._*
+
+# Downloaded corpora
+data/ea/
+data/ms/
