@@ -195,6 +195,14 @@ python ea/train_noise_flow.py --dataset data/ea/dataset/ea_dataset.jsonl.gz --ou
 
 `data/ea/noise_flow.report.json` compares it on the test articles with independent Gaussians per element and with the flow given only the calculated % of C, H, N, S (NLL), gives the coverage of its 50 % / 90 % intervals and the AUC of a classifier that tells real from generated analyses of the same molecules (0.5 = indistinguishable), also for the resampling model.
 
+`--model spline` trains the same autoregressive model with neural spline flow factors instead of Gaussian mixtures (Durkan et al. 2019): each delta is mapped by asinh(Δ / 0.1), linear at the sharp peak near zero and logarithmic in the tails, then by a monotone rational-quadratic spline (16 bins) whose knots come from the formula, the previous deltas and their flags, to a standard normal. `--compare` adds another checkpoint to the report.
+
+```bash
+python ea/train_noise_flow.py --model spline --output data/ea/noise_flow_spline.pt --compare data/ea/noise_flow.pt
+```
+
+Both checkpoints load with `ElementalAnalysisFlow`. `sample(..., with_other=True)` adds Other = 100 − C − H − N − S, so the five parts sum to 100 %. Other is not modelled on its own: it is not measured, unknown whenever an element of the compound is not reported (a quarter of the analyses), and C + H + N + S exceed 100 % in about 1 % of real analyses of compounds made only of these elements, so a strict simplex (log-ratio) model would not fit the data. The report compares the share of such analyses and the spread of Other − Calcd, real and generated.
+
 ```python
 from blind.ea_noise_flow import ElementalAnalysisFlow
 flow = ElementalAnalysisFlow("data/ea/noise_flow.pt")

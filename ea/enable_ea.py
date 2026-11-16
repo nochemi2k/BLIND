@@ -54,7 +54,7 @@ NOISE_MODEL_PATH = "data/ea/ea_noise.json"
 
 EA_DROP_PROB = 0.3
 EA_NOISE = "flow"
-FLOW_PATH = "data/ea/noise_flow.pt"
+FLOW_PATH = "data/ea/noise_flow.pt"  # or data/ea/noise_flow_spline.pt (ea/train_noise_flow.py --model spline)
 FLOW_SAMPLES = 16
 # Probability that an element is measured: (present in the molecule, absent from it)
 MEASURE_PROB = {"C": (1.0, 1.0), "H": (1.0, 1.0), "N": (0.95, 0.5), "S": (0.5, 0.25)}
