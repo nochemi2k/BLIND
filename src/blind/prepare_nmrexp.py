@@ -209,7 +209,7 @@ def load_excluded_keys(path: typing.Optional[str]) -> typing.Set[str]:
 
 
 def train_tokenizer(smiles: typing.Iterable[str], output_dir: str, vocab_size: int) -> str:
-    """Train a BPE tokenizer with the same settings as models/smiles_tokenizer.model."""
+    """Train a BPE tokenizer with the settings of the original BLIND tokenizer."""
     corpus_path = os.path.join(output_dir, "tokenizer_corpus.txt")
     with open(corpus_path, "w", encoding="utf-8") as f:
         for s in smiles:

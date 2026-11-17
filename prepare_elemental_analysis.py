@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Entry point for building the elemental analysis noise model from PubMed Central articles
-(see src/blind/prepare_elemental_analysis.py).
+Entry point for building the elemental analysis noise models of the resampling generator from the
+experimental dataset (see src/blind/prepare_elemental_analysis.py).
 """
 import sys
 from pathlib import Path

@@ -291,7 +291,7 @@ def evaluate_top_n(
     optimized = _load_optimized_sampling_defaults()
     if optimized:
         print(
-            "Sampling defaults from models/optimized_params.json: "
+            "Sampling defaults from src/blind/data/optimized_params.json: "
             f"top_k={int(optimized.get('top_k', 50))}, "
             f"top_p={float(optimized.get('top_p', 0.95)):.3f}, "
             f"temperature={float(optimized.get('temperature', 1.0)):.3f}"
@@ -521,7 +521,7 @@ def evaluate_top_n(
 
 
 def _load_optimized_sampling_defaults() -> dict:
-    params_path = Path(__file__).resolve().parents[2] / "models" / "optimized_params.json"
+    params_path = Path(__file__).resolve().parent / "data" / "optimized_params.json"
     if not params_path.exists():
         return {}
     with open(params_path, "r", encoding="utf-8") as f:
@@ -537,7 +537,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tokenizer-path",
         type=str,
-        default="models/smiles_tokenizer.model",
+        default="data/nmrexp/processed/smiles_tokenizer.model",
         help="Path to SentencePiece tokenizer model.",
     )
     parser.add_argument(

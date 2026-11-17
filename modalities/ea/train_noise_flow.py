@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
 Trains the generator of realistic elemental analyses (src/blind/ea_noise_flow.py) on the experimental
-analyses of ea/build_dataset.py and compares it with simpler noise models on held-out articles.
+analyses of modalities/ea/build_dataset.py and compares it with simpler noise models on held-out articles.
 
-    python ea/train_noise_flow.py --dataset data/ea/dataset/ea_dataset.jsonl.gz --output data/ea/noise_flow.pt
-    python ea/train_noise_flow.py --model spline --output data/ea/noise_flow_spline.pt --compare data/ea/noise_flow.pt
-
---model mixture: autoregressive Gaussian-mixture flow; spline: autoregressive neural spline flow (same inputs).
+    python modalities/ea/train_noise_flow.py --dataset data/ea/dataset/ea_dataset.jsonl.gz --output data/ea/noise_flow.pt
+    python modalities/ea/train_noise_flow.py --output data/ea/noise_flow_v2.pt --compare data/ea/noise_flow.pt
 
 Analyses with a SMILES are used, organic and metal compounds together. Train / val / test are split by
 article (PMCID), as one lab's analyses share their errors. Written next to the checkpoint:
@@ -30,13 +28,13 @@ import sys
 import typing
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import numpy as np
 import torch
 
 from blind.elemental_analysis import ElementalAnalysisNoise, mass_percent
-from blind.ea_noise_flow import MODELS, NONMETALS, NUM_FEATURES, TARGETS, NoiseFlow, compound, features, target_arrays
+from blind.ea_noise_flow import NONMETALS, NUM_FEATURES, TARGETS, NoiseFlow, compound, features, target_arrays
 
 # Larger deviations come from a wrong structure or formula, not from the measurement
 MAX_ABS_DELTA = 5.0
@@ -96,7 +94,7 @@ def tensors(data: dict, mask: np.ndarray, device: str) -> typing.List[torch.Tens
 
 def train_flow(data: dict, args, calc_only: bool) -> NoiseFlow:
     torch.manual_seed(0)
-    model = MODELS[args.model]().to(args.device)
+    model = NoiseFlow().to(args.device)
     train = tensors(data, data["split"] == "train", args.device)
     val = tensors(data, data["split"] == "val", args.device)
     if calc_only:
@@ -214,7 +212,6 @@ def main() -> None:
     parser.add_argument("--dataset", default="data/ea/dataset/ea_dataset.jsonl.gz")
     parser.add_argument("--output", default="data/ea/noise_flow.pt")
     parser.add_argument("--resampling-model", default="data/ea/ea_noise_all.json")
-    parser.add_argument("--model", choices=sorted(MODELS), default="mixture")
     parser.add_argument("--compare", help="Checkpoint of another generator to compare with on the same test articles")
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch-size", type=int, default=512)
@@ -234,7 +231,7 @@ def main() -> None:
     other_flow = None
     if args.compare:
         checkpoint = torch.load(args.compare, map_location=args.device, weights_only=False)
-        other_flow = MODELS[checkpoint.get("model", "mixture")](**checkpoint["config"]).to(args.device).eval()
+        other_flow = NoiseFlow(**checkpoint["config"]).to(args.device).eval()
         other_flow.load_state_dict(checkpoint["state_dict"])
 
     report = {"num_analyses": dict(splits), "dropped": data["dropped"], "max_abs_delta": MAX_ABS_DELTA, "test": {}}
@@ -285,7 +282,6 @@ def main() -> None:
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     torch.save({
-        "model": args.model,
         "config": {"num_features": NUM_FEATURES},
         "state_dict": {k: v.cpu() for k, v in flow.state_dict().items()},
         "zero_found": data["zero_found"],

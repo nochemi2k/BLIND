@@ -569,7 +569,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tokenizer-path",
         type=str,
-        default="models/smiles_tokenizer.model",
+        default="data/nmrexp/processed/smiles_tokenizer.model",
         help="Path to SentencePiece tokenizer model.",
     )
     parser.add_argument(

@@ -11,12 +11,12 @@ Articles with elemental analyses: full texts and supporting information, for a f
      <output-dir>/si/PMCxxx.txt.gz    text of the supplementary PDF/DOCX files (pdftotext), paragraphs
                                       separated by blank lines; empty when there are none
    and article metadata in <output-dir>/si/meta.jsonl. Files already there are skipped.
-The output folder is read by ea/build_dataset.py like the other corpora:
-    python ea/build_dataset.py --input-dirs ... <output-dir>
+The output folder is read by modalities/ea/build_dataset.py like the other corpora:
+    python modalities/ea/build_dataset.py --input-dirs ... <output-dir>
 
 Needs Python 3.8+ (standard library only) and pdftotext (poppler-utils). One file is enough on the
-server together with ea/download_si.py next to it. Run:
-    python ea/download_corpus.py --output-dir data/ea/corpus2 --skip-ids data/ea/downloaded_pmcids.json \
+server together with modalities/ea/download_si.py next to it. Run:
+    python modalities/ea/download_corpus.py --output-dir data/ea/corpus2 --skip-ids data/ea/downloaded_pmcids.json \
         --max-articles 60000 --num-workers 128
 """
 import argparse

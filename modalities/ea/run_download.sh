@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Download of articles and supporting information for the elemental analysis dataset (ea/download_corpus.py).
+# Download of articles and supporting information for the elemental analysis dataset (modalities/ea/download_corpus.py).
 #
-#   bash ea/run_download.sh start    checks, test download of one article, then starts in the background
-#   bash ea/run_download.sh status   running or not, progress, files on disk, last errors
-#   bash ea/run_download.sh stop     stops it (a new start continues where it stopped)
-#   bash ea/run_download.sh log      follows the log
+#   bash modalities/ea/run_download.sh start    checks, test download of one article, then starts in the background
+#   bash modalities/ea/run_download.sh status   running or not, progress, files on disk, last errors
+#   bash modalities/ea/run_download.sh stop     stops it (a new start continues where it stopped)
+#   bash modalities/ea/run_download.sh log      follows the log
 #
 # Settings (environment variables): OUT_DIR, WORKERS, MAX_ARTICLES, PYTHON
 set -u
@@ -15,7 +15,7 @@ WORKERS="${WORKERS:-64}"
 MAX_ARTICLES="${MAX_ARTICLES:-80000}"
 PYTHON="${PYTHON:-python3}"
 LOG="$OUT_DIR/download.log"
-PATTERN="ea/download_corpus.py --output-dir $OUT_DIR"
+PATTERN="modalities/ea/download_corpus.py --output-dir $OUT_DIR"
 
 ok()   { echo "  [OK]    $*"; }
 fail() { echo "  [ERROR] $*"; exit 1; }
@@ -27,7 +27,7 @@ count() { find "$1" -name "$2" 2>/dev/null | wc -l | tr -d ' '; }
 start() {
     echo "Checks:"
     if [ -n "$(running_pid)" ]; then
-        fail "a download into $OUT_DIR is already running (pid $(running_pid)); see: bash ea/run_download.sh status"
+        fail "a download into $OUT_DIR is already running (pid $(running_pid)); see: bash modalities/ea/run_download.sh status"
     fi
     "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 8)' 2>/dev/null || fail "$PYTHON not found or older than 3.8 (set PYTHON=...)"
     ok "python: $("$PYTHON" --version 2>&1)"
@@ -44,7 +44,7 @@ start() {
     TEST_DIR=$(mktemp -d)
     "$PYTHON" - "$TEST_DIR" <<'EOF' || fail "test download of one article failed (see the error above)"
 import os, sys
-sys.path.insert(0, "ea")
+sys.path.insert(0, "modalities/ea")
 import download_corpus as d
 out = sys.argv[1]
 for sub in ("raw", "si"):
@@ -73,8 +73,8 @@ EOF
     echo "Download STARTED (pid $(running_pid)), log: $LOG"
     tail -3 "$LOG"
     echo
-    echo "Status:  bash ea/run_download.sh status"
-    echo "Log:     bash ea/run_download.sh log"
+    echo "Status:  bash modalities/ea/run_download.sh status"
+    echo "Log:     bash modalities/ea/run_download.sh log"
 }
 
 status() {
@@ -84,7 +84,7 @@ status() {
     elif grep -q "^done" "$LOG" 2>/dev/null; then
         echo "State:      FINISHED"
     else
-        echo "State:      NOT RUNNING (start or continue: bash ea/run_download.sh start)"
+        echo "State:      NOT RUNNING (start or continue: bash modalities/ea/run_download.sh start)"
     fi
     echo "Full texts: $(count "$OUT_DIR/raw" '*.xml.gz')   supporting information: $(count "$OUT_DIR/si" 'PMC*.txt.gz')   size: $(du -sh "$OUT_DIR" 2>/dev/null | cut -f1)"
     if [ -f "$LOG" ]; then
@@ -93,9 +93,6 @@ status() {
         errors=$(grep -ci "traceback\|error" "$LOG")
         [ "$errors" -gt 0 ] && { echo "Errors in log: $errors, last:"; grep -i "error" "$LOG" | tail -3; }
     fi
-    # The run started by Claude before this script (log in the repository root)
-    [ -f corpus2.log ] && [ "$LOG" != corpus2.log ] && [ -n "$pid" ] && grep -q download: corpus2.log && \
-        echo "(also logged to corpus2.log: $(grep download: corpus2.log | tail -1 | sed 's/^ *//'))"
     return 0
 }
 
@@ -103,7 +100,7 @@ stop() {
     pid=$(running_pid)
     [ -z "$pid" ] && { echo "Not running"; return 0; }
     pkill -f "$PATTERN"; sleep 2
-    [ -z "$(running_pid)" ] && echo "Stopped (bash ea/run_download.sh start continues from here)" || echo "Still running: kill $(running_pid)"
+    [ -z "$(running_pid)" ] && echo "Stopped (bash modalities/ea/run_download.sh start continues from here)" || echo "Still running: kill $(running_pid)"
 }
 
 case "${1:-}" in

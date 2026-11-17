@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-LLM translations of the compound names that OPSIN and ea/ligands.py could not turn into SMILES.
+LLM translations of the compound names that OPSIN and modalities/ea/ligands.py could not turn into SMILES.
 
-ea/build_dataset.py writes the analyses left as llm_todo.jsonl (candidate names from the text before
+modalities/ea/build_dataset.py writes the analyses left as llm_todo.jsonl (candidate names from the text before
 the statement + target formula, without solvates). Then
-    python ea/llm_smiles.py split --output-dir data/ea/dataset      # llm_batches/batch_XXXX.jsonl
+    python modalities/ea/llm_smiles.py split --output-dir data/ea/dataset      # llm_batches/batch_XXXX.jsonl
     (an LLM writes llm_batches/batch_XXXX.answers.jsonl: {"key": ..., "smiles": ...} per line,
      using `check` to compare its SMILES with the formula and fix them)
-    python ea/llm_smiles.py check data/ea/dataset/llm_batches/batch_0000.answers.jsonl
-    python ea/llm_smiles.py context PMC1234567 --file <file of the item> --grep L1 3a   # article text
-    python ea/llm_smiles.py merge --output-dir data/ea/dataset      # llm_smiles.json
-and ea/build_dataset.py is run again: it reads llm_smiles.json and keeps an LLM SMILES only if its
+    python modalities/ea/llm_smiles.py check data/ea/dataset/llm_batches/batch_0000.answers.jsonl
+    python modalities/ea/llm_smiles.py context PMC1234567 --file <file of the item> --grep L1 3a   # article text
+    python modalities/ea/llm_smiles.py merge --output-dir data/ea/dataset      # llm_smiles.json
+and modalities/ea/build_dataset.py is run again: it reads llm_smiles.json and keeps an LLM SMILES only if its
 element composition equals the formula of the statement, like any other source.
 """
 import argparse
@@ -21,7 +21,7 @@ import sys
 import typing
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from rdkit import Chem, RDLogger
 

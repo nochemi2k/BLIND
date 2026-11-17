@@ -2,18 +2,18 @@
 """
 Dataset of experimental elemental analyses with structures: SMILES, molecular formula, Calcd and Found.
 
-Reads the PubMed Central full texts downloaded by prepare_elemental_analysis.py (any number of
-<dir>/raw/*.xml.gz folders) and the supporting information texts from ea/download_si.py (<dir>/si/*.txt.gz), parses every "Anal. Calcd for <formula>: ... Found: ..." statement
+Reads the PubMed Central full texts downloaded by modalities/ea/download_corpus.py (any number of
+<dir>/raw/*.xml.gz folders) and the supporting information texts from modalities/ea/download_si.py (<dir>/si/*.txt.gz), parses every "Anal. Calcd for <formula>: ... Found: ..." statement
 and looks for the name of the compound in the text before it (start of the paragraph, bold text,
 section title, bracket formulas such as [Cu(phen)2Cl]ClO4). Names are turned into SMILES by
-  - ea/ligands.py for coordination formulas and additive names of complexes,
+  - modalities/ea/ligands.py for coordination formulas and additive names of complexes,
   - OPSIN (systematic names; needs java and the OPSIN jar),
   - PubChem (optional, trivial names),
-  - LLM translations of the names left (llm_smiles.json in the output dir, see ea/llm_smiles.py),
+  - LLM translations of the names left (llm_smiles.json in the output dir, see modalities/ea/llm_smiles.py),
 and a SMILES is kept only if its element composition equals the formula of the statement.
 
 Run from the repository root:
-    python ea/build_dataset.py --input-dirs data/ea data/ea/metals data/ea/complexes data/ea/general \
+    python modalities/ea/build_dataset.py --input-dirs data/ea data/ea/metals data/ea/complexes data/ea/general \
         --opsin-jar data/ea/tools/opsin.jar --output-dir data/ea/dataset
 """
 import argparse
@@ -37,7 +37,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from rdkit import Chem, RDLogger
@@ -620,7 +620,7 @@ def hill(counts: typing.Mapping[str, float]) -> str:
 
 
 def llm_key(row: dict) -> str:
-    # One analysis: its article, candidate names and formula (the formula last, for ea/llm_smiles.py check)
+    # One analysis: its article, candidate names and formula (the formula last, for modalities/ea/llm_smiles.py check)
     names = json.dumps(row["names"] + row["bracket"] or row["labels"], ensure_ascii=False)
     digest = hashlib.md5(f"{row['pmcid']}|{names}".encode()).hexdigest()[:16]
     return f"{digest}\t{hill(formula_targets(row)[-1])}"
@@ -772,10 +772,10 @@ def main() -> None:
         if results[i][0] is None and set(r["formula"]) & METALS and by_article.get(r["pmcid"]):
             results[i] = resolve(r, {}, {}, article_ligands(by_article[r["pmcid"]]))
 
-    # Names still unresolved, for ea/llm_smiles.py
+    # Names still unresolved, for modalities/ea/llm_smiles.py
     todo = {}
     for r, (smiles, _, _) in zip(rows, results):
-        # Labels (3a, L1, HL) count too: the LLM looks them up in the article text (ea/llm_smiles.py context)
+        # Labels (3a, L1, HL) count too: the LLM looks them up in the article text (modalities/ea/llm_smiles.py context)
         names = [n for n in r["names"] + r["bracket"] if translatable(n)]
         key = llm_key(r)
         if smiles is None and (names or r["labels"]) and key not in llm and key not in todo:

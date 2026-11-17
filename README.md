@@ -27,33 +27,40 @@ BLIND is a bimodal encoder–decoder Transformer. Each NMR peak is encoded as `(
 | Optimizer | AdamW, lr = 3×10⁻⁴ |
 | Batch size / epochs | 128 / 200 |
 | Solvent filter | CDCl₃ |
-| Top-N sampling defaults | `top_k=16`, `top_p=0.908`, `temperature=1.014` (from `models/optimized_params.json`) |
+| Top-N sampling defaults | `top_k=16`, `top_p=0.908`, `temperature=1.014` (from `src/blind/data/optimized_params.json`) |
 
 ## Repository Structure
 
 ```
 BLIND/
-├── train.py, evaluate.py, evaluate_top_n.py   # Entry points
+├── train.py, evaluate.py, evaluate_top_n.py   # Entry points (1H/13C model)
+├── prepare_nmrexp.py, prepare_nmrexp_hetero.py, prepare_elemental_analysis.py, prepare_ms.py
 ├── requirements.txt                           # Project dependencies
 │
 ├── src/blind/
 │   ├── training.py, evaluation.py, evaluation_top_n.py
 │   ├── data_io.py                             # JSONL + CSV loading
 │   ├── device.py                              # CUDA / MPS / CPU selection
-│   ├── models/transformer.py
-│   └── data/multiplicity_codes.json
+│   ├── models/                                # transformer, hetero_transformer, ea_transformer
+│   ├── elemental_analysis.py, ea_noise_flow.py, ea_statements.py, ms_spectra.py
+│   └── data/multiplicity_codes*.json, optimized_params.json   # optimized_params: top-N sampling defaults
 │
-├── models/
-│   ├── smiles_tokenizer.model                 # SentencePiece tokenizer
-│   └── optimized_params.json
+├── modalities/                                # Extra inputs on top of the main code, run from the root
+│   ├── hetero/                                # 19F, 31P, 11B, 29Si spectra
+│   ├── ea/                                    # Elemental analysis: model, generator, dataset building
+│   ├── ms/                                    # MS2 spectra
+│   └── no_couplings/                          # Ablation without J couplings
 │
-├── checkpoints/
-│   └── blind_trained_weights.pt               # Pre-trained weights
+├── analysis/                                  # Notebooks and scripts for test results
+│
+├── checkpoints/                               # Trained weights (not in git)
 │
 └── data/
     ├── samples/                               # Small test set (8 compounds)
     │   ├── train.jsonl, val.jsonl, test.jsonl
-    └── external_validation_results.csv        # Full external validation set
+    ├── external_validation_results.csv        # Full external validation set
+    ├── nmrexp/processed/smiles_tokenizer.model   # SentencePiece tokenizer (prepare_nmrexp.py)
+    └── ea/                                    # Elemental analysis dataset and generators (not in git)
 ```
 
 See the paper for full data preparation details.
@@ -122,17 +129,15 @@ Multiple lines with the same `smiles` but different `spectrum_type` represent bi
 
 `prepare_nmrexp.py` converts the [NMRexp](https://zenodo.org/records/17296666) parquet into `data/nmrexp/processed/` (70/20/10 splits by molecule and a new tokenizer). Each peak also carries `couplings`, the J values in Hz; the model uses the 4 largest per peak. Multiplicities use `src/blind/data/multiplicity_codes_nmrexp.json`; labels not listed there become `m`.
 
-The peak embedding includes J constants, so `checkpoints/blind_trained_weights.pt` does not load with this model.
-
 ### Heteronuclear spectra (19F, 31P, 11B, 29Si)
 
-`prepare_nmrexp_hetero.py` copies `data/nmrexp/processed/` to `data/nmrexp/processed_hetero/` and adds the CDCl3 heteronuclear spectra (`F_NMR`, `P_NMR`, `B_NMR`, `Si_NMR` records) of the same molecules; splits and tokenizer are unchanged. The model (`src/blind/models/hetero_transformer.py`) adds a small encoder per nucleus and a cross-attention per nucleus in every decoder layer. `hetero/` runs the main training and evaluation code with it, without changing the main code.
+`prepare_nmrexp_hetero.py` copies `data/nmrexp/processed/` to `data/nmrexp/processed_hetero/` and adds the CDCl3 heteronuclear spectra (`F_NMR`, `P_NMR`, `B_NMR`, `Si_NMR` records) of the same molecules; splits and tokenizer are unchanged. The model (`src/blind/models/hetero_transformer.py`) adds a small encoder per nucleus and a cross-attention per nucleus in every decoder layer. `modalities/hetero/` runs the main training and evaluation code with it, without changing the main code.
 
 ```bash
 python prepare_nmrexp_hetero.py
 
 # Fine-tune a trained 1H/13C model; each epoch: all molecules with heteronuclear spectra + 3 times as many without
-python hetero/train.py \
+python modalities/hetero/train.py \
     --init-checkpoint checkpoints/<1H/13C model>.pt \
     --train-path data/nmrexp/processed_hetero/train.jsonl.gz \
     --val-path data/nmrexp/processed_hetero/val.jsonl.gz \
@@ -140,7 +145,7 @@ python hetero/train.py \
     --lr 1e-4 --epochs 30 --exp-prefix hetero
 
 # Evaluate; --no-hetero hides the heteronuclear spectra (same weights, ablation)
-python hetero/evaluate.py \
+python modalities/hetero/evaluate.py \
     --checkpoint checkpoints/hetero_epoch_29.pt \
     --data-path data/nmrexp/processed_hetero/test.jsonl.gz \
     --tokenizer-path data/nmrexp/processed/smiles_tokenizer.model \
@@ -153,10 +158,10 @@ During fine-tuning each heteronuclear spectrum is dropped with probability 0.2; 
 
 ### Elemental analysis noise model
 
-There is no public dataset of elemental analyses with structures, so the analysis is computed from the SMILES and made realistic with noise taken from published data. `prepare_elemental_analysis.py` downloads open-access PubMed Central articles that report "Anal. Calcd for ...: C, ...; H, .... Found: ..." (Europe PMC search, NCBI E-utilities full text), keeps the statements whose calculated values match the formula and writes `data/ea/ea_noise.json`: how often each element is reported when present, the neutral solvates added to formulas, and the Found − Calcd vectors.
+The simplest generator of realistic analyses resamples published noise. `prepare_elemental_analysis.py` reads the experimental dataset below (`data/ea/dataset/ea_dataset.jsonl.gz`), keeps the statements whose calculated values match the formula and writes `data/ea/ea_noise.json` (no metals), `ea_noise_complexes.json` and `ea_noise_all.json`: how often each element is reported when present, the neutral solvates added to formulas, and the Found − Calcd vectors. The learned generator below replaces it in training; it remains for robustness checks (`--ea-noise resampling`).
 
 ```bash
-python prepare_elemental_analysis.py --num-articles 5000   # ~45 min; --skip-download to only re-parse
+python prepare_elemental_analysis.py --dataset data/ea/dataset/ea_dataset.jsonl.gz --output-dir data/ea
 ```
 
 `src/blind/elemental_analysis.py` draws a "Found" analysis for a molecule: the reported elements, a solvate with the observed frequency, and a Found − Calcd vector resampled from analyses that report the same elements, so the spread, tails and the share of values fitted to the calculated ones follow real data.
@@ -170,10 +175,10 @@ noise.sample(formula_counts("CC(=O)NC(C)c1ccccc1"), np.random.default_rng(0))  #
 
 ### Experimental elemental analyses with structures
 
-`ea/build_dataset.py` turns the downloaded articles into a dataset of experimental analyses: SMILES, molecular formula, Calcd and Found values, source article. The structure comes from the name of the compound in the text before the analysis and is kept only if its composition equals the formula of the analysis. Names are converted by [OPSIN](https://github.com/dan2097/opsin) (systematic names; needs Java, e.g. `conda install -c conda-forge openjdk`, and the OPSIN jar) and by `ea/ligands.py` for complexes (bracket formulas such as `[Cu(phen)2Cl]ClO4`, additive names, and ligands labelled in the same article, e.g. `[Os(p-cym)Cl(L1)]Cl` once L1 is resolved). Complexes are written as disconnected ions.
+`modalities/ea/build_dataset.py` turns the downloaded articles into a dataset of experimental analyses: SMILES, molecular formula, Calcd and Found values, source article. The structure comes from the name of the compound in the text before the analysis and is kept only if its composition equals the formula of the analysis. Names are converted by [OPSIN](https://github.com/dan2097/opsin) (systematic names; needs Java, e.g. `conda install -c conda-forge openjdk`, and the OPSIN jar) and by `modalities/ea/ligands.py` for complexes (bracket formulas such as `[Cu(phen)2Cl]ClO4`, additive names, and ligands labelled in the same article, e.g. `[Os(p-cym)Cl(L1)]Cl` once L1 is resolved). Complexes are written as disconnected ions.
 
 ```bash
-python ea/build_dataset.py --input-dirs data/ea data/ea/metals data/ea/complexes data/ea/general \
+python modalities/ea/build_dataset.py --input-dirs data/ea data/ea/metals data/ea/complexes data/ea/general \
     --opsin-jar data/ea/tools/opsin.jar --output-dir data/ea/dataset
 ```
 
@@ -181,27 +186,23 @@ Output: `ea_dataset.jsonl.gz` (all analyses, `smiles` null when the name was not
 
 Statements are found by `src/blind/ea_statements.py`: two adjacent blocks of element-value pairs (or one block of "value (value)" pairs) next to the words calcd/found/requires, in any order and style ("Anal. Calcd for X: ... Found: ...", "Found: ... X requires ...", "X (MW): calcd. ...; found ...", "found (calcd)"), with the formula taken from any formula in the text around them whose composition gives the calculated values (it may also be only in the HRMS line). Names are tried as written and in cleaned forms (trailing labels and section numbers removed, "Hydrochloride of X" reordered, words joined); a compound named only by its label (11, 3a, L1) gets the names written before "(11)" elsewhere in the article (`smiles_source` = `opsin_label`); a SMILES that differs from the formula by HCl, HBr, HI, H2O, TFA or MsOH gets those fragments added or removed.
 
-Articles and supporting information can also be downloaded with `bash ea/run_download.sh start` (checks, a test download, then a background run of `ea/download_corpus.py`; `status`, `stop`, `log`).
+Articles and supporting information can also be downloaded with `bash modalities/ea/run_download.sh start` (checks, a test download, then a background run of `modalities/ea/download_corpus.py`; `status`, `stop`, `log`).
 
-The analyses left unresolved are also written to `llm_todo.jsonl` (candidate names + target formula without solvates) for translation by an LLM, mainly for complexes whose ligands are trivial names or abbreviations. `ea/llm_smiles.py split` cuts it into batches, the LLM writes `llm_batches/batch_XXXX.answers.jsonl` and checks them with `ea/llm_smiles.py check`, `ea/llm_smiles.py merge` collects the formula-verified SMILES into `llm_smiles.json`, and the next `build_dataset.py` run uses them (`smiles_source` = `llm`). A matching formula does not prove the structure (isomers, ligands guessed from the formula), so these rows are less reliable than OPSIN ones and can be filtered by `smiles_source`.
+The analyses left unresolved are also written to `llm_todo.jsonl` (candidate names + target formula without solvates) for translation by an LLM, mainly for complexes whose ligands are trivial names or abbreviations. `modalities/ea/llm_smiles.py split` cuts it into batches, the LLM writes `llm_batches/batch_XXXX.answers.jsonl` and checks them with `modalities/ea/llm_smiles.py check`, `modalities/ea/llm_smiles.py merge` collects the formula-verified SMILES into `llm_smiles.json`, and the next `build_dataset.py` run uses them (`smiles_source` = `llm`). A matching formula does not prove the structure (isomers, ligands guessed from the formula), so these rows are less reliable than OPSIN ones and can be filtered by `smiles_source`.
 
 ### Learned generator of elemental analyses
 
-`src/blind/ea_noise_flow.py` is a generative model of Found values for C, H, N, S given only the molecular formula, trained by `ea/train_noise_flow.py` on the experimental dataset above (organic compounds and metal complexes together; no compound class is given). It models Δ = Found − Calcd, with Calcd computed from the SMILES plus the acids and counterions of the formula (HCl, TFA, PF6, ...) but not the neutral solvates: their shift of the Found values (a hydrate, residual CH2Cl2) is part of the learned noise, as a real sample holds them too. The density is autoregressive over C → H → N → S, each factor a mixture of 8 Gaussians from an MLP over formula features (mass % of the elements and of metals, weight, atom ratios: what an analysis tells anyway, no structural features, so the noise cannot hint at the structure), the previous deltas and their observed flags (an autoregressive flow: exact likelihood, sampling in one pass). Elements the article did not report are masked out of the likelihood, so sulfur (10k analyses) does not limit C, H, N (90k). Elements absent from the molecule but measured ("N, 0.00") take the empirical Found values of such reports. Analyses with |Δ| > 5 (wrong structure or formula) are left out; train / val / test are split by article.
+`src/blind/ea_noise_flow.py` is a generative model of Found values for C, H, N, S given only the molecular formula, trained by `modalities/ea/train_noise_flow.py` on the experimental dataset above (organic compounds and metal complexes together; no compound class is given). It models Δ = Found − Calcd, with Calcd computed from the SMILES plus the acids and counterions of the formula (HCl, TFA, PF6, ...) but not the neutral solvates: their shift of the Found values (a hydrate, residual CH2Cl2) is part of the learned noise, as a real sample holds them too. The density is autoregressive over C → H → N → S, each factor a mixture of 8 Gaussians from an MLP over formula features (mass % of the elements and of metals, weight, atom ratios: what an analysis tells anyway, no structural features, so the noise cannot hint at the structure), the previous deltas and their observed flags (an autoregressive flow: exact likelihood, sampling in one pass). Elements the article did not report are masked out of the likelihood, so sulfur (10k analyses) does not limit C, H, N (90k). Elements absent from the molecule but measured ("N, 0.00") take the empirical Found values of such reports. Analyses with |Δ| > 5 (wrong structure or formula) are left out; train / val / test are split by article.
 
 ```bash
-python ea/train_noise_flow.py --dataset data/ea/dataset/ea_dataset.jsonl.gz --output data/ea/noise_flow.pt
+python modalities/ea/train_noise_flow.py --dataset data/ea/dataset/ea_dataset.jsonl.gz --output data/ea/noise_flow.pt
 ```
 
 `data/ea/noise_flow.report.json` compares it on the test articles with independent Gaussians per element and with the flow given only the calculated % of C, H, N, S (NLL), gives the coverage of its 50 % / 90 % intervals and the AUC of a classifier that tells real from generated analyses of the same molecules (0.5 = indistinguishable), also for the resampling model.
 
-`--model spline` trains the same autoregressive model with neural spline flow factors instead of Gaussian mixtures (Durkan et al. 2019): each delta is mapped by asinh(Δ / 0.1), linear at the sharp peak near zero and logarithmic in the tails, then by a monotone rational-quadratic spline (16 bins) whose knots come from the formula, the previous deltas and their flags, to a standard normal. `--compare` adds another checkpoint to the report.
+`--compare <checkpoint>` adds another generator to the report. A neural spline flow version (rational-quadratic splines instead of mixtures) was tried and matched the mixture model, also for the trained model with elemental analysis, so it was not kept.
 
-```bash
-python ea/train_noise_flow.py --model spline --output data/ea/noise_flow_spline.pt --compare data/ea/noise_flow.pt
-```
-
-Both checkpoints load with `ElementalAnalysisFlow`. `sample(..., with_other=True)` adds Other = 100 − C − H − N − S, so the five parts sum to 100 %. Other is not modelled on its own: it is not measured, unknown whenever an element of the compound is not reported (a quarter of the analyses), and C + H + N + S exceed 100 % in about 1 % of real analyses of compounds made only of these elements, so a strict simplex (log-ratio) model would not fit the data. The report compares the share of such analyses and the spread of Other − Calcd, real and generated.
+`ElementalAnalysisFlow.sample(..., with_other=True)` adds Other = 100 − C − H − N − S, so the five parts sum to 100 %. Other is not modelled on its own: it is not measured, unknown whenever an element of the compound is not reported (a quarter of the analyses), and C + H + N + S exceed 100 % in about 1 % of real analyses of compounds made only of these elements, so a strict simplex (log-ratio) model would not fit the data. The report compares the share of such analyses and the spread of Other − Calcd, real and generated.
 
 ```python
 from blind.ea_noise_flow import ElementalAnalysisFlow
@@ -211,24 +212,53 @@ flow.sample(["CC(=O)NC(C)c1ccccc1"], num_samples=4)  # [1, 4, 4] Found % of C, H
 
 ### Elemental analysis as input
 
-The model with elemental analysis (`src/blind/models/ea_transformer.py`) extends the model with heteronuclear spectra: a small encoder over the reported elements, one token per element (element embedding, Fourier features of the Found mass % and of the molar % among the reported elements, both in absolute %, the scale of the measurement error), and a cross-attention to it in every decoder layer. `ea/` runs the main training and evaluation code with it, on top of `hetero/`: the same data, sampling, heteronuclear dropout and empty spectra. The weights of a trained model with heteronuclear spectra are loaded as they are; the new parts start with a zero output projection, so before fine-tuning the model reproduces that model.
+The model with elemental analysis (`src/blind/models/ea_transformer.py`) extends the model with heteronuclear spectra: a small encoder over the reported elements, one token per element (element embedding, Fourier features of the Found mass % and of the molar % among the reported elements, both in absolute %, the scale of the measurement error), and a cross-attention to it in every decoder layer. `modalities/ea/` runs the main training and evaluation code with it, on top of `modalities/hetero/`: the same data, sampling, heteronuclear dropout and empty spectra. The weights of a trained model with heteronuclear spectra are loaded as they are; the new parts start with a zero output projection, so before fine-tuning the model reproduces that model.
 
-Analyses come from the learned generator (`EA_NOISE = "flow"` in `ea/enable_ea.py`; 16 per molecule generated when the dataset is built) and follow what a user enters: C and H always, N for 95 % of molecules with nitrogen, S for half of those with sulfur, and an element absent from the molecule is sometimes given as measured (≈ 0.00; N 50 %, S 25 %). A measured element is a token, even at 0.00; an element not measured has no token, so "measured, zero" and "unknown" are different inputs. `EA_NOISE = "resampling"` keeps the resampling model with all reported elements. Each time a molecule is seen in training one of its analyses is picked and the whole analysis is dropped with probability 0.3; in evaluation every example gets a fixed analysis seeded by its SMILES. `--no-ea` hides it; `--no-hetero` and `--empty-hetero` work as in `hetero/`.
+Analyses come from the learned generator (`EA_NOISE = "flow"` in `modalities/ea/enable_ea.py`; 16 per molecule generated when the dataset is built) and follow what a user enters: C and H always, N for 95 % of molecules with nitrogen, S for half of those with sulfur, and an element absent from the molecule is sometimes given as measured (≈ 0.00; N 50 %, S 25 %). A measured element is a token, even at 0.00; an element not measured has no token, so "measured, zero" and "unknown" are different inputs. `EA_NOISE = "resampling"` keeps the resampling model with all reported elements. Each time a molecule is seen in training one of its analyses is picked and the whole analysis is dropped with probability 0.3; in evaluation every example gets a fixed analysis seeded by its SMILES. `--no-ea` hides it; `--no-hetero` and `--empty-hetero` work as in `modalities/hetero/`.
 
 ```bash
-python ea/train.py \
+python modalities/ea/train.py \
     --init-checkpoint checkpoints/<model with heteronuclear spectra>.pt \
     --train-path data/nmrexp/processed_hetero/train.jsonl.gz \
     --val-path data/nmrexp/processed_hetero/val.jsonl.gz \
     --tokenizer-path data/nmrexp/processed/smiles_tokenizer.model \
     --lr 1e-4 --epochs 30 --exp-prefix ea
 
-python ea/evaluate.py \
+python modalities/ea/evaluate.py \
     --checkpoint checkpoints/ea_epoch_29.pt \
     --data-path data/nmrexp/processed_hetero/test.jsonl.gz \
     --tokenizer-path data/nmrexp/processed/smiles_tokenizer.model \
     --output-json results/ea_29.json
 ```
+
+### MS2 spectra
+
+`prepare_ms.py` turns the collected experimental mass spectra (`data/ms/cleaned_all.jsonl.gz`: GNPS, MoNA, MassBank and others) into `data/ms/processed/{train,val,test}.npz`. Every MS2 spectrum is kept whatever the ionization (ESI, APCI, EI, ...); in-silico spectra and other MS levels are dropped, peaks above the precursor m/z are removed, the 128 most intense are kept, intensities are scaled to a maximum of 1 and identical spectra of a molecule are merged. Adduct, polarity, ionization, instrument class and charge are mapped to small vocabularies (`src/blind/ms_spectra.py`) and stored for analysis. The splits use the molecule hash of `prepare_nmrexp.py`, so a molecule with NMR spectra is in the same split in both datasets. 1.19 M spectra of 287 k molecules; 4.8 k of them also have NMR spectra.
+
+```bash
+python prepare_ms.py   # ~2 min
+```
+
+The model (`src/blind/models/ms_transformer.py`) extends the model with elemental analysis by an MS2 encoder and a cross-attention to it in every decoder layer. A spectrum is given as its peaks only, each a token with Fourier features of its m/z and of the square root of its intensity; the precursor m/z and the acquisition metadata (adduct, polarity, ionization, instrument, collision energy) are not given to the model for now (they stay in the `.npz` files and group the results of `evaluate_ms.py`). `modalities/ms/` fine-tunes a model with elemental analysis; the new parts start with a zero output projection, so the start reproduces that model. Every epoch sees the NMR molecules as in `modalities/ea/` (all with heteronuclear or MS2 spectra plus three times as many others), each with its MS2 spectrum when it has one (dropped with probability 0.3), and all molecules that have MS2 spectra but no NMR spectra: an MS2 spectrum alone, and with an elemental analysis from the generator in half of the cases.
+
+```bash
+python modalities/ms/train.py \
+    --init-checkpoint checkpoints/ea_flow_epoch_49.pt \
+    --train-path data/nmrexp/processed_hetero/train.jsonl.gz \
+    --val-path data/nmrexp/processed_hetero/val.jsonl.gz \
+    --tokenizer-path data/nmrexp/processed/smiles_tokenizer.model \
+    --lr 1e-4 --epochs 30 --exp-prefix ms
+
+# NMR test set (an example gets an MS2 spectrum when its molecule has one); --no-ms, --no-ea, --no-hetero as before
+python modalities/ms/evaluate.py --checkpoint checkpoints/ms_epoch_29.pt \
+    --data-path data/nmrexp/processed_hetero/test.jsonl.gz --output-json results/ms_29.json
+
+# MS2 spectrum alone (all molecules of the MS2 test split), with and without an elemental analysis
+python modalities/ms/evaluate_ms.py --checkpoint checkpoints/ms_epoch_29.pt --output-json results/ms_only_29.json
+python modalities/ms/evaluate_ms.py --checkpoint checkpoints/ms_epoch_29.pt --no-ea --output-json results/ms_only_29_no_ea.json
+```
+
+`evaluate_ms.py` reports exact-match accuracy overall and by polarity, ionization, instrument class, adduct and whether the precursor m/z is known.
 
 ## Usage
 
@@ -252,7 +282,7 @@ python train.py --device mps
 | `--device` | `auto` | `auto`, `cuda`, `mps`, or `cpu` |
 | `--train-path` | `data/samples/train.jsonl` | Training data |
 | `--val-path` | `data/samples/val.jsonl` | Validation data |
-| `--tokenizer-path` | `models/smiles_tokenizer.model` | SentencePiece tokenizer |
+| `--tokenizer-path` | `data/nmrexp/processed/smiles_tokenizer.model` | SentencePiece tokenizer |
 | `--checkpoint-dir` | `checkpoints` | Checkpoint output directory |
 | `--exp-prefix` | `blind_256` | Checkpoint filename prefix |
 | `--batch-size` | 128 | Training batch size |
@@ -264,13 +294,13 @@ python train.py --device mps
 
 ```bash
 python evaluate.py \
-    --checkpoint checkpoints/blind_trained_weights.pt \
+    --checkpoint checkpoints/blind_nmrexp_epoch_199.pt \
     --data-path data/samples/test.jsonl \
     --output-json results.json
 
 # External validation (CSV)
 python evaluate.py \
-    --checkpoint checkpoints/blind_trained_weights.pt \
+    --checkpoint checkpoints/blind_nmrexp_epoch_199.pt \
     --data-path data/external_validation_results.csv \
     --output-json external_val_results.json
 ```
@@ -281,13 +311,13 @@ Reports exact-match accuracy and SMILES validity by modality: **Only C**, **Only
 
 ```bash
 python evaluate_top_n.py \
-    --checkpoint checkpoints/blind_trained_weights.pt \
+    --checkpoint checkpoints/blind_nmrexp_epoch_199.pt \
     --data-path data/external_validation_results.csv \
     --num-samples 10 \
     --output-json external_val_topn.json
 ```
 
-Uses optimized sampling defaults from `models/optimized_params.json` (`top_k=16`, `top_p≈0.908`, `temperature≈1.014`; override with `--top-k`, `--top-p`, `--temperature`). Default `--num-samples` is 10 (top-10 evaluation). Reports top-10 exact-match accuracy and validity.
+Uses optimized sampling defaults from `src/blind/data/optimized_params.json` (`top_k=16`, `top_p≈0.908`, `temperature≈1.014`; override with `--top-k`, `--top-p`, `--temperature`). Default `--num-samples` is 10 (top-10 evaluation). Reports top-10 exact-match accuracy and validity.
 
 ## Citation
 

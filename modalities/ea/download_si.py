@@ -7,10 +7,10 @@ The PMCIDs come from a Europe PMC search; for each article the supplementary fil
 the PMC Open Access bucket on AWS (static files, fast; https://pmc.ncbi.nlm.nih.gov/tools/pmcaws/) or,
 for articles not there, from the Europe PMC REST service (a zip, built per request: slow), and the text of its PDF (pdftotext, poppler) and DOCX files is
 written to <output-dir>/si/<PMCID>.txt.gz, paragraphs separated by blank lines; article metadata goes to
-<output-dir>/si/meta.jsonl. ea/build_dataset.py parses these files together with the full texts.
+<output-dir>/si/meta.jsonl. modalities/ea/build_dataset.py parses these files together with the full texts.
 
 Run from the repository root:
-    python ea/download_si.py --output-dir data/ea/si_corpus --max-articles 15000
+    python modalities/ea/download_si.py --output-dir data/ea/si_corpus --max-articles 15000
 """
 import argparse
 import concurrent.futures

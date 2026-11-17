@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Entry point for fine-tuning a trained model with heteronuclear spectra (hetero/) with elemental analysis.
+Entry point for fine-tuning a trained model with heteronuclear spectra (modalities/hetero/) with elemental analysis.
 Run from the repository root; takes the arguments of train.py plus --init-checkpoint.
 --flow-path picks the generator checkpoint (default data/ea/noise_flow.pt), --ea-noise flow|resampling
 the noise model.

@@ -3,19 +3,19 @@ Elemental analysis (CHN combustion) as an extra input to the model with heteronu
 without touching the main code.
 
 Importing this module points training and evaluation at EATransformer and at the datasets of
-hetero/enable_hetero.py extended with a simulated elemental analysis: exact composition from
+modalities/hetero/enable_hetero.py extended with a simulated elemental analysis: exact composition from
 the SMILES plus the empirical noise of published analyses (src/blind/elemental_analysis.py,
 data/ea/ea_noise.json). The analysis is added to the 13C batch dict as "EA/<field>" keys, so
 the main loops run unchanged.
 
 Training is a fine-tune of a trained model with heteronuclear spectra (INIT_CHECKPOINT) on the
-same data and sampling as hetero/: heteronuclear dropout, empty spectra and PLAIN_PER_HETERO
+same data and sampling as modalities/hetero/: heteronuclear dropout, empty spectra and PLAIN_PER_HETERO
 molecules without heteronuclear spectra per molecule with one. A new analysis is drawn every
 time a molecule is seen and is dropped with probability EA_DROP_PROB. In evaluation the
 analysis of each example is fixed by a seed derived from its SMILES.
 
 EA_NOISE = "flow" (default) draws Found values of C, H, N, S from the learned generator
-(src/blind/ea_noise_flow.py, FLOW_PATH, trained by ea/train_noise_flow.py on organic compounds
+(src/blind/ea_noise_flow.py, FLOW_PATH, trained by modalities/ea/train_noise_flow.py on organic compounds
 and metal complexes): FLOW_SAMPLES analyses per molecule are generated once when the dataset is
 built. Which elements the model sees follows what a user enters: C and H always, N and S by
 MEASURE_PROB. A measured element absent from the molecule is given as its Found value (about
@@ -28,7 +28,7 @@ import sys
 import typing
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hetero"))
 
 import numpy as np
@@ -54,14 +54,19 @@ NOISE_MODEL_PATH = "data/ea/ea_noise.json"
 
 EA_DROP_PROB = 0.3
 EA_NOISE = "flow"
-FLOW_PATH = "data/ea/noise_flow.pt"  # or data/ea/noise_flow_spline.pt (ea/train_noise_flow.py --model spline)
+FLOW_PATH = "data/ea/noise_flow.pt"
 FLOW_SAMPLES = 16
 # Probability that an element is measured: (present in the molecule, absent from it)
 MEASURE_PROB = {"C": (1.0, 1.0), "H": (1.0, 1.0), "N": (0.95, 0.5), "S": (0.5, 0.25)}
 
 
 def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> EATransformer:
-    model = EATransformer(
+    return EATransformer(**model_kwargs(tokenizer, smiles_pad_token))
+
+
+def model_kwargs(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> typing.Dict[str, typing.Any]:
+    """Architecture of the model with elemental analysis (also the base of modalities/ms)."""
+    return dict(
         ea_value_hidden_dim=40,
         ea_element_hidden_dim=16,
         ea_hidden_dim=96,  # 16 + 40 + 40
@@ -95,7 +100,6 @@ def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) ->
         dropout=0.2,
         smiles_pad_token=smiles_pad_token,
     )
-    return model
 
 
 def build_model_from_hetero(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> EATransformer:
