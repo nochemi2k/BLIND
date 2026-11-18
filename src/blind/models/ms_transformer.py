@@ -8,6 +8,7 @@ from .transformer import EncoderLayer, FourierEmbedding, MultiHeadAttention
 MS_PREFIX = "MS/"
 MS_PAD = -1000.0
 MZ_SCALE = 100.0  # m/z enters the Fourier features in units of 100 Da
+MS_PEAK, MS_PRECURSOR = 0, 1  # token types
 
 def split_ms(
     src_c_nmr : typing.Dict[str, torch.Tensor]
@@ -31,11 +32,12 @@ class MSEncoder(torch.nn.Module):
     ) -> None:
         super(MSEncoder, self).__init__()
 
-        # A peak is its m/z and intensity only: no precursor, adduct or instrument metadata.
-        # No positional encoding: peaks are sorted by m/z, which the embedding already carries.
+        # Tokens: the precursor ion (its m/z, when reported) and the peaks (m/z, intensity); no adduct or
+        # instrument metadata. No positional encoding: peaks are sorted by m/z, which the embedding carries.
         hidden_dim = mz_hidden_dim + intensity_hidden_dim
         self.mz_emb = FourierEmbedding(d_ff=mz_d_ff, output_dim=mz_hidden_dim)
         self.intensity_emb = FourierEmbedding(d_ff=mz_d_ff, output_dim=intensity_hidden_dim)
+        self.type_emb = torch.nn.Embedding(2, hidden_dim)
         self.layers = torch.nn.ModuleList([EncoderLayer(hidden_dim, num_heads, d_ff, dropout) for _ in range(num_layers)])
         self.proj = torch.nn.Linear(hidden_dim, d_model)
         self.dropout = torch.nn.Dropout(dropout)
@@ -47,7 +49,7 @@ class MSEncoder(torch.nn.Module):
     ) -> torch.Tensor:
         mz = data['mz'].clamp(min=0) / MZ_SCALE
         x = torch.cat([self.mz_emb(mz), self.intensity_emb(data['intensity'].sqrt())], dim=-1)
-        x = self.dropout(x)
+        x = self.dropout(x + self.type_emb(data['token_type']))
         for layer in self.layers:
             x = layer(x, mask)
         return self.proj(x)

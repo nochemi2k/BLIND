@@ -3,8 +3,8 @@ MS2 spectra as an extra input to the model with elemental analysis, without touc
 
 Importing this module points training and evaluation at MSTransformer (src/blind/models/ms_transformer.py)
 and at the datasets of modalities/ea extended with one MS2 spectrum per example, from the splits of
-prepare_ms.py (MS_DIR/<split>.npz). A spectrum is given as its peaks only (m/z, intensity), without the
-precursor or acquisition metadata. The spectrum is added to the 13C batch dict as "MS/<field>" keys,
+prepare_ms.py (MS_DIR/<split>.npz). A spectrum is given as its precursor m/z (when reported) and its peaks
+(m/z, intensity), without the adduct or other acquisition metadata. The spectrum is added to the 13C batch dict as "MS/<field>" keys,
 so the main loops run unchanged.
 
 Training is a fine-tune of a trained model with elemental analysis (INIT_CHECKPOINT). Every epoch:
@@ -37,7 +37,7 @@ from blind.data_io import load_jsonl_data
 from blind.ea_noise_flow import ElementalAnalysisFlow
 from blind.elemental_analysis import ElementalAnalysisNoise, formula_counts
 from blind.models.hetero_transformer import HETERO_TYPES
-from blind.models.ms_transformer import MS_PAD, MS_PREFIX, MSTransformer
+from blind.models.ms_transformer import MS_PAD, MS_PEAK, MS_PRECURSOR, MS_PREFIX, MSTransformer
 from blind.ms_spectra import META_FIELDS
 from blind.training import load_multiplicity_codes, process_data
 from enable_ea import CollateEAEvalWrapper, CollateEATrainWrapper, EANMRDataset
@@ -99,11 +99,15 @@ class MSStore:
         return self.by_smiles.get(smiles, [])
 
     def tensorize(self, spectrum: int) -> typing.Dict[str, torch.Tensor]:
-        """Peaks only: m/z and intensity (the metadata stay in the store, for evaluate_ms.py groups)."""
+        """Precursor token (when its m/z is reported, intensity 1) + peaks (m/z, intensity). The other
+        metadata stay in the store, for the groups of evaluate_ms.py."""
         lo, hi = self.offsets[spectrum], self.offsets[spectrum + 1]
+        precursor = float(self.precursor_mz[spectrum])
+        head = [precursor] if np.isfinite(precursor) else []
         return {
-            "mz": torch.from_numpy(self.mz[lo:hi].copy()),
-            "intensity": torch.from_numpy(self.intensity[lo:hi].copy()),
+            "mz": torch.tensor(np.concatenate([head, self.mz[lo:hi]]), dtype=torch.float32),
+            "intensity": torch.tensor(np.concatenate([[1.0] * len(head), self.intensity[lo:hi]]), dtype=torch.float32),
+            "token_type": torch.tensor([MS_PRECURSOR] * len(head) + [MS_PEAK] * (hi - lo), dtype=torch.int64),
         }
 
 
@@ -205,9 +209,10 @@ class CombinedSampler(torch.utils.data.Sampler):
 
 
 def add_ms(collated: typing.Dict[str, typing.Any], batch: typing.List[typing.Dict[str, typing.Any]]) -> typing.Dict[str, typing.Any]:
-    for field, pad_value in (("mz", MS_PAD), ("intensity", 0.0)):
+    for field, pad_value in (("mz", MS_PAD), ("intensity", 0.0), ("token_type", MS_PEAK)):
+        dtype = torch.int64 if field == "token_type" else torch.float32
         sequences = [
-            cur["ms"][field] if cur.get("ms") is not None else torch.tensor([pad_value], dtype=torch.float32)
+            cur["ms"][field] if cur.get("ms") is not None else torch.tensor([pad_value], dtype=dtype)
             for cur in batch
         ]
         collated["C_NMR"][f"{MS_PREFIX}{field}"] = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True, padding_value=pad_value)
