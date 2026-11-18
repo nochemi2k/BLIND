@@ -44,6 +44,7 @@ from enable_ea import CollateEAEvalWrapper, CollateEATrainWrapper, EANMRDataset
 from enable_hetero import BalancedHeteroSampler, pop_argument  # noqa: F401 (pop_argument used by entry points)
 
 INIT_CHECKPOINT: typing.Optional[str] = None  # set by train.py: a model with elemental analysis
+RESUME_CHECKPOINT: typing.Optional[str] = None  # set by train.py: a model with MS2 spectra to train further
 USE_MS = True  # evaluate*.py --no-ms sets False
 MS_DIR = "data/ms/processed"
 
@@ -64,9 +65,14 @@ def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) ->
 
 
 def build_model_from_ea(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> MSTransformer:
-    if INIT_CHECKPOINT is None:
-        raise ValueError("--init-checkpoint (trained model with elemental analysis) is required")
     model = build_model(tokenizer, smiles_pad_token)
+    if RESUME_CHECKPOINT is not None:
+        # A model with MS2 spectra: all weights as they are (init_from_ea would zero the MS2 cross-attentions)
+        model.load_state_dict(torch.load(RESUME_CHECKPOINT, map_location="cpu"))
+        print(f"Resumed from {RESUME_CHECKPOINT} (optimizer state starts anew)")
+        return model
+    if INIT_CHECKPOINT is None:
+        raise ValueError("--init-checkpoint (trained model with elemental analysis) or --resume-checkpoint is required")
     model.init_from_ea(torch.load(INIT_CHECKPOINT, map_location="cpu"))
     print(f"Initialized from {INIT_CHECKPOINT}; MS2 encoder and cross-attentions are new")
     return model
