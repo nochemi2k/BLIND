@@ -58,6 +58,16 @@ FLOW_PATH = "data/ea/noise_flow.pt"
 FLOW_SAMPLES = 16
 # Probability that an element is measured: (present in the molecule, absent from it)
 MEASURE_PROB = {"C": (1.0, 1.0), "H": (1.0, 1.0), "N": (0.95, 0.5), "S": (0.5, 0.25)}
+# Main transformer sizes. "base" is the model of the paper (all checkpoints so far); "large" is for
+# training from scratch on all inputs (modalities/joint). A peak token of 1H/13C is the concatenation
+# shift + intensity + multiplicity + 4 coupling slots, which must add up to d_model.
+MODEL_SIZE = "base"
+MODEL_SIZES = {
+    "base": dict(spectrum_hidden_dim=104, intensity_hidden_dim=104, multiplicity_hidden_dim=48, coupling_slot_dim=8,
+                 d_model=288, num_heads=8, num_layers=6, d_ff=512, dropout=0.2),
+    "large": dict(spectrum_hidden_dim=136, intensity_hidden_dim=136, multiplicity_hidden_dim=64, coupling_slot_dim=12,
+                  d_model=384, num_heads=8, num_layers=8, d_ff=1536, dropout=0.1),
+}
 
 
 def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> EATransformer:
@@ -65,8 +75,8 @@ def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) ->
 
 
 def model_kwargs(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> typing.Dict[str, typing.Any]:
-    """Architecture of the model with elemental analysis (also the base of modalities/ms)."""
-    return dict(
+    """Architecture of the model with elemental analysis (also the base of modalities/ms), of size MODEL_SIZE."""
+    kwargs = dict(
         ea_value_hidden_dim=40,
         ea_element_hidden_dim=16,
         ea_hidden_dim=96,  # 16 + 40 + 40
@@ -100,6 +110,8 @@ def model_kwargs(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -
         dropout=0.2,
         smiles_pad_token=smiles_pad_token,
     )
+    kwargs.update(MODEL_SIZES[MODEL_SIZE])
+    return kwargs
 
 
 def build_model_from_hetero(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> EATransformer:

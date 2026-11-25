@@ -38,3 +38,7 @@ Thumbs.db
 # Downloaded corpora
 data/ea/
 data/ms/
+
+# Joint training data (modalities/joint/prepare_joint.py)
+data/joint/
+data/joint_prepare.log

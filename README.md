@@ -49,6 +49,7 @@ BLIND/
 │   ├── hetero/                                # 19F, 31P, 11B, 29Si spectra
 │   ├── ea/                                    # Elemental analysis: model, generator, dataset building
 │   ├── ms/                                    # MS2 spectra
+│   ├── joint/                                 # All inputs, trained from scratch together
 │   └── no_couplings/                          # Ablation without J couplings
 │
 ├── analysis/                                  # Notebooks and scripts for test results
@@ -259,6 +260,28 @@ python modalities/ms/evaluate_ms.py --checkpoint checkpoints/ms_epoch_29.pt --no
 ```
 
 `evaluate_ms.py` reports exact-match accuracy overall and by polarity, ionization, instrument class, adduct and whether the precursor m/z is known.
+
+### Joint training from scratch
+
+Fine-tuning modality after modality pushed out part of what the model knew (after the MS2 stage the NMR accuracy fell by 3–5 points). `modalities/joint/` trains the MS2 architecture from scratch on all inputs at once, so every epoch keeps all of them.
+
+- Data (`modalities/joint/prepare_joint.py`): a new SMILES tokenizer (BPE, 512) trained on the training molecules of both datasets, and the MS2 splits rebuilt with it in `data/joint/ms/`; the NMR splits are `data/nmrexp/processed_hetero`, molecules the tokenizer cannot encode within 275 tokens are dropped at load.
+- Epochs of fixed size (1 M examples) drawn by fixed shares from four groups of molecules: NMR only 50 %, NMR with heteronuclear spectra 20 %, NMR + MS2 5 % (the 3.4 k shared molecules, about 15 times per epoch, the only place where the two meet), MS2 only 25 %.
+- Every input dropped on its own in each example: one of 1H / 13C (0.2), each heteronuclear spectrum (0.2), the elemental analysis (0.3; MS2-only molecules get it with 0.5), the MS2 spectrum (0.3); at least one spectrum stays. The elemental analysis comes from the generator for every molecule.
+- The loss ignores padding tokens; the learning rate rises linearly over the first 4000 steps (`--warmup-steps`), then follows the plateau schedule of the main training.
+- `--model-size large` (default here): d_model 384 (peak token 136 + 136 + 64 + 4 × 12), 8 encoder and decoder layers, d_ff 1536, dropout 0.1, MS2 encoder 256; 85 M parameters against 30 M of `base` (the earlier models, also available). The evaluation scripts of `modalities/ms` take the same `--model-size`.
+- Validation every 5 epochs: greedy exact-match accuracy on 512 fixed validation examples of each input combination (H+C, H+C+EA, H, H+EA, C, C+EA, H+C+MS, H+C+MS+EA, H+MS, H+MS+EA, MS, MS+EA); the checkpoint with the highest mean is kept as `<prefix>_best.pt`, and `<prefix>_last.pt` allows `--resume`.
+
+```bash
+python modalities/joint/prepare_joint.py --output-dir data/joint    # ~10 min
+python modalities/joint/train.py --device cuda --mixed-precision --epochs 200 --exp-prefix joint
+
+# Test sets: the evaluation scripts of modalities/ms with the joint tokenizer and MS2 splits
+python modalities/ms/evaluate.py --model-size large --checkpoint checkpoints/joint_best.pt --tokenizer-path data/joint/smiles_tokenizer.model \
+    --ms-dir data/joint/ms --data-path data/nmrexp/processed_hetero/test.jsonl.gz --output-json results/joint.json
+python modalities/ms/evaluate_ms.py --model-size large --checkpoint checkpoints/joint_best.pt --tokenizer-path data/joint/smiles_tokenizer.model \
+    --ms-dir data/joint/ms --output-json results/joint_ms_only.json
+```
 
 ## Usage
 

@@ -53,13 +53,16 @@ MS_ONLY_EA_PROB = 0.5  # molecules with MS2 only: probability to get an elementa
 MS_ONLY_PER_EPOCH: typing.Optional[int] = None  # None: all molecules with MS2 only, every epoch
 
 
+# MS2 encoder sizes, chosen with enable_ea.MODEL_SIZE
+MS_ENCODER_SIZES = {
+    "base": dict(ms_mz_hidden_dim=144, ms_intensity_hidden_dim=48, ms_num_heads=6, ms_num_layers=4, ms_d_ff=384),  # 192 per peak
+    "large": dict(ms_mz_hidden_dim=192, ms_intensity_hidden_dim=64, ms_num_heads=8, ms_num_layers=4, ms_d_ff=768),  # 256 per peak
+}
+
+
 def build_model(tokenizer: spm.SentencePieceProcessor, smiles_pad_token: int) -> MSTransformer:
     return MSTransformer(
-        ms_mz_hidden_dim=144,
-        ms_intensity_hidden_dim=48,  # 192 per peak
-        ms_num_heads=6,
-        ms_num_layers=4,
-        ms_d_ff=384,
+        **MS_ENCODER_SIZES[enable_ea.MODEL_SIZE],
         **enable_ea.model_kwargs(tokenizer, smiles_pad_token),
     )
 

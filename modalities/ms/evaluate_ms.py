@@ -80,6 +80,7 @@ def main() -> None:
     parser.add_argument("--no-ea", action="store_true", help="No elemental analysis.")
     parser.add_argument("--flow-path", default=enable_ms.enable_ea.FLOW_PATH)
     parser.add_argument("--ea-noise", default=enable_ms.enable_ea.EA_NOISE)
+    parser.add_argument("--model-size", default=enable_ms.enable_ea.MODEL_SIZE, choices=sorted(enable_ms.enable_ea.MODEL_SIZES))
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-workers", type=int, default=default_num_workers())
     parser.add_argument("--max-tokens", type=int, default=275)
@@ -91,6 +92,7 @@ def main() -> None:
     enable_ms.MS_DIR = args.ms_dir
     enable_ms.enable_ea.FLOW_PATH = args.flow_path
     enable_ms.enable_ea.EA_NOISE = args.ea_noise
+    enable_ms.enable_ea.MODEL_SIZE = args.model_size
 
     device = resolve_device(args.device)
     print(f"Using device: {device}; elemental analysis: {'OFF' if args.no_ea else 'ON'}")

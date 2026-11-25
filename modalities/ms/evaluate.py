@@ -3,13 +3,14 @@
 Entry point for evaluating a model with MS2 spectra on NMR test data (greedy decoding).
 Run from the repository root; --no-ms hides the MS2 spectra, --no-ea the elemental analysis, --no-hetero
 the heteronuclear spectra; --empty-hetero gives an empty spectrum for each nucleus absent from the molecule.
---ms-dir, --flow-path and --ea-noise as in train.py. Molecules with MS2 spectra only: evaluate_ms.py.
+--ms-dir, --flow-path, --ea-noise and --model-size (base or large) as in train.py. Molecules with MS2 spectra only: evaluate_ms.py.
 """
 import enable_ms
 
 from blind.evaluation import evaluate, parse_args
 
 if __name__ == "__main__":
+    enable_ms.enable_ea.MODEL_SIZE = enable_ms.pop_argument("--model-size") or enable_ms.enable_ea.MODEL_SIZE
     enable_ms.MS_DIR = enable_ms.pop_argument("--ms-dir") or enable_ms.MS_DIR
     enable_ms.enable_ea.FLOW_PATH = enable_ms.pop_argument("--flow-path") or enable_ms.enable_ea.FLOW_PATH
     enable_ms.enable_ea.EA_NOISE = enable_ms.pop_argument("--ea-noise") or enable_ms.enable_ea.EA_NOISE
