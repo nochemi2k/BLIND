@@ -53,8 +53,13 @@ BLIND/
 └── data/
     ├── samples/                               # Small test set (8 compounds)
     │   ├── train.jsonl, val.jsonl, test.jsonl
+    ├── train_smiles.txt                       # Training split: canonical SMILES, one per line (1,822,391)
+    ├── valid_smiles.txt                       # Validation split: canonical SMILES, one per line (260,341)
+    ├── test_smiles.txt                        # Test split: canonical SMILES, one per line (520,682)
     └── external_validation_results.csv        # Full external validation set
 ```
+
+The `*_smiles.txt` files define the exact molecular composition of the training, validation, and test splits used in the paper. Every structure can be queried directly on [OdanChem](https://odanchem.org/) to retrieve the corresponding experimental spectra under the conditions stated in the paper (CDCl₃ solvent, snapshot of 29 June 2026).
 
 See the paper for full data preparation details.
 
