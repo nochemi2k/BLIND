@@ -23,8 +23,12 @@ class FourierEmbedding(torch.nn.Module):
         self,
         x : torch.Tensor # [B, L]
     ) -> torch.Tensor: # [B, L, output_dim]
-        x_proj = 2 * torch.pi * torch.einsum('bl,eo->blo', x, self.B) # [B, L, d_ff/2]
-        fourier = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1) # [B, L, d_ff]
+        # Always in fp32: the phases reach hundreds of radians (13C shifts up to ~220 ppm), where fp16/bf16
+        # spacing is ~0.1-8 rad and sin/cos turn into noise; under mixed precision the features would then
+        # differ between training (autocast) and evaluation (fp32)
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            x_proj = 2 * torch.pi * torch.einsum('bl,eo->blo', x.float(), self.B.float()) # [B, L, d_ff/2]
+            fourier = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1) # [B, L, d_ff]
         return self.proj(fourier)
 
 class CouplingEmbedding(torch.nn.Module):
